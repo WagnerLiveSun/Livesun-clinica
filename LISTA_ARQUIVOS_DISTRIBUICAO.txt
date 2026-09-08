@@ -1,0 +1,85 @@
+LISTA DE ARQUIVOS PARA DISTRIBUIÇÃO - LiveSun Clinicas (Versão Portátil)
+
+=== ARQUIVOS OBRIGATÓRIOS ===
+
+Scripts de Instalação e Execução:
+- instalar-portatil.bat          (Script de instalação inicial)
+- verificar-mysql.bat            (Script para verificar instalação MySQL)
+- criar-banco.bat                (Script para criar banco automaticamente)
+- iniciar-portatil.bat           (Script para iniciar o servidor)
+
+Build do Sistema:
+- dist/index.js                  (Servidor compilado - 159.7kb)
+- dist/public/index.html         (Página principal)
+- dist/public/assets/            (Assets web compilados)
+  - index-C9cgmgHj.css           (120.50 kB)
+  - index-DSD4Q1x5.js            (1,191.06 kB)
+  - logo-livesun.svg             (Logo LiveSun)
+  - logo-sunset.svg              (Logo Sunset)
+
+Configuração:
+- config/local.env.template      (Template de configuração)
+- database/sunset_schema_mysql.sql (Schema do banco de dados)
+
+Documentação:
+- INSTALACAO_EXECUTAVEL_WINDOWS.md (Guia de instalação detalhado)
+- README_PORTATIL.md             (Visão geral da versão portátil)
+- RESUMO_EMPACOTAMENTO.md        (Histórico técnico do processo)
+
+=== ARQUIVOS CRIADOS NA INSTALAÇÃO ===
+
+- .env                          (Configuração do usuário - NÃO DISTRIBUIR)
+- storage/                      (Diretório para uploads - CRIADO NA INSTALAÇÃO)
+- logs/                         (Diretório para logs - CRIADO NA INSTALAÇÃO)
+
+=== ARQUIVOS QUE NÃO DEVEM SER DISTRIBUÍDOS ===
+
+- node_modules/                 (Dependências de desenvolvimento)
+- server/                       (Código fonte do servidor)
+- client/                       (Código fonte do cliente)
+- package.json                  (Configuração do projeto)
+- package-lock.json             (Lockfile de dependências)
+- pnpm-lock.yaml                (Lockfile do pnpm)
+- tsconfig.json                 (Configuração TypeScript)
+- vite.config.ts                (Configuração Vite)
+- .git/                         (Controle de versão)
+- .env.example                  (Exemplo de ambiente)
+- iniciar-local.bat             (Script para desenvolvimento)
+- instalar-local.bat            (Script para desenvolvimento)
+- EXECUCAO_LOCAL.md             (Documentação de desenvolvimento)
+
+=== TAMANHO ESTIMADO DO PACOTE ===
+
+- Scripts: ~8 KB (4 scripts BAT)
+- Build: ~1.3 MB
+- Assets: ~1.3 MB
+- Documentação: ~25 KB
+- Schema SQL: ~10 KB
+- Template config: ~1 KB
+
+TOTAL: ~2.65 MB (sem compressão ZIP)
+
+=== INSTRUÇÕES PARA CRIAÇÃO DO ZIP ===
+
+1. Criar pasta temporária "LiveSun_Clinicas_Portatil"
+2. Copiar todos os arquivos obrigatórios listados acima
+3. Compactar a pasta em ZIP
+4. Testar a extração e instalação em ambiente limpo
+5. Distribuir o ZIP final
+
+=== PRÉ-REQUISITOS DO USUÁRIO FINAL ===
+
+- Windows 10 ou superior
+- Node.js 20 ou superior (https://nodejs.org/)
+- MySQL 8.0 ou superior
+- Navegador atualizado
+
+=== PROCESSO DE INSTALAÇÃO DO USUÁRIO ===
+
+1. Instalar Node.js 20+ em https://nodejs.org/
+2. Extrair o ZIP em pasta permanente (ex: C:\LiveSun)
+3. Executar instalar-portatil.bat
+4. Configurar o arquivo .env aberto automaticamente
+5. Criar banco MySQL usando database/sunset_schema_mysql.sql
+6. Executar iniciar-portatil.bat
+7. Acessar http://localhost:3000 no navegador

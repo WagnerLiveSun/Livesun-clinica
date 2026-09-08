@@ -1,0 +1,1 @@
+-- Campos legados já existentes foram preservados durante a consolidação do modelo de dados.

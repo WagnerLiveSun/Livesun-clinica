@@ -1,0 +1,111 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1786383862655,
+      "tag": "0000_empty_madelyne_pryor",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1786383988422,
+      "tag": "0001_careless_pete_wisdom",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786454793133,
+      "tag": "0002_powerful_lenny_balinger",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1786454826147,
+      "tag": "0003_mute_prism",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1786659853953,
+      "tag": "0004_local_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1786660830172,
+      "tag": "0005_smooth_proemial_gods",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1786660929200,
+      "tag": "0006_deep_starfox",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1786730774896,
+      "tag": "0007_rich_doctor_octopus",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1786733064209,
+      "tag": "0008_opposite_franklin_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1786734882083,
+      "tag": "0009_noisy_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1786982458762,
+      "tag": "0010_mysterious_echo",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787066474937,
+      "tag": "0011_aspiring_patriot",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1787068165555,
+      "tag": "0012_curvy_roulette",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1787070485909,
+      "tag": "0013_cuddly_hobgoblin",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1787075539851,
+      "tag": "0014_melodic_wrecker",
+      "breakpoints": true
+    }
+  ]
+}

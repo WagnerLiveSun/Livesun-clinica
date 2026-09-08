@@ -1,0 +1,28 @@
+﻿# Segredos / credenciais - NUNCA versionar
+.env
+.env.*
+!.env.example
+CREDENCIAIS_MASTER.md
+Acesso_Mysql_Hostinger_Clinica.txt
+*.pem
+*.key
+
+# Dependencias
+node_modules/
+.pnpm-store/
+
+# Builds e artefatos
+dist/
+build/
+*.zip
+*.log
+logs/
+.manus-logs/
+storage/
+.vscode/
+.project-config.json
+
+LiveSun_Clinicas_Portatil/
+e2e/results/
+playwright-report/
+

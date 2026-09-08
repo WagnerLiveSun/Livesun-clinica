@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 210" role="img" aria-labelledby="title description">
+	<title id="title">LiveSun Tecnologia</title>
+	<desc id="description">Logotipo institucional LiveSun Tecnologia</desc>
+	<defs>
+		<linearGradient id="live-sun-gradient" x1="0" y1="0" x2="1" y2="0">
+			<stop offset="0" stop-color="#ffde00" />
+			<stop offset="0.42" stop-color="#f58200" />
+			<stop offset="0.72" stop-color="#f20d00" />
+			<stop offset="1" stop-color="#d90000" />
+		</linearGradient>
+	</defs>
+	<text x="18" y="112" fill="url(#live-sun-gradient)" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="700" letter-spacing="-6">LiveSun</text>
+	<path d="M16 135H387l-10-8m10 8-10 8" fill="none" stroke="#8e3027" stroke-width="2" />
+	<text x="232" y="177" fill="#00a7c4" font-family="Arial, Helvetica, sans-serif" font-size="38" font-style="italic" font-weight="700">Tecnologia</text>
+</svg>
