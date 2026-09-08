@@ -4,10 +4,12 @@ services:
     runtime: node
     plan: free
     rootDir: .
-    buildCommand: corepack enable && pnpm install && pnpm run build
+    buildCommand: npx -y pnpm@10.4.1 install && npx -y pnpm@10.4.1 run build
     startCommand: node dist/index.js
     healthCheckPath: /
     envVars:
+      - key: NODE_VERSION
+        value: 20.18.1
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
