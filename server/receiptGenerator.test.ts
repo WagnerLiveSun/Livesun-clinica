@@ -85,6 +85,9 @@ describe("gerador de recibos", () => {
     expect(html).toContain("HISTÓRICO DE PAGAMENTOS");
     expect(html).toContain("DINHEIRO");
     expect(html).toContain("CARTAO_CREDITO");
-    expect(html).toContain("PENDENTE");
+    // No recibo do cliente, a situação exibida é "Liquidado" (pagamento feito).
+    // A pendência de liquidação da adquirente é interna e não aparece ao cliente.
+    expect(html).toContain("Liquidado");
+    expect(html).not.toContain(">PENDENTE<");
   });
 });

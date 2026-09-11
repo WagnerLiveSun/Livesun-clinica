@@ -73,7 +73,7 @@ export function generateReceiptHTML(data: ReceiptData): string {
           <tr>
             <td>${format(item.dataPagamento, "dd/MM/yyyy", { locale: ptBR })}</td>
             <td>${item.tipoPagamento}</td>
-            <td>${item.statusLiquidacao}</td>
+            <td><span class="situacao-liquida">Liquidado</span></td>
             <td class="num">${currencyFmt.format(item.valor)}</td>
           </tr>`).join("");
 
@@ -343,6 +343,11 @@ export function generateReceiptHTML(data: ReceiptData): string {
     .history-table td.num {
       text-align: right;
       font-variant-numeric: tabular-nums;
+    }
+
+    .situacao-liquida {
+      color: #1e7e34;
+      font-weight: 600;
     }
 
     .receipt-badge {
