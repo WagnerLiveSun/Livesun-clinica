@@ -46,6 +46,7 @@ import { selectPendingCommissionIds } from "./commissionSettlements";
 import { resolveReminderDeliveryChannel, sendBrevoReminder } from "./reminders";
 import { storagePut } from "./storage";
 import { clinicBrevoConfig, decryptSecret, encryptSecret, maskSecret } from "./brevoConfig";
+import { generateReceiptHTML, generateReceiptNumber } from "./receiptGenerator";
 
 const roles = z.enum(["master", "user", "admin", "recepcao", "profissional", "cliente"]);
 const sessionStatus = z.enum([
@@ -830,6 +831,106 @@ export const appRouter = router({
         await db.update(recebimentos).set({ statusLiquidacao: "LIQUIDADO", dataLiquidacao: input.dataLiquidacao, liquidadoEm: new Date() }).where(and(eq(recebimentos.id, input.id), eq(recebimentos.clinicaId, ctx.clinicaId)));
         await audit(ctx.user.id, "recebimento", "LIQUIDADO", input.id, receipt.clienteId, input);
         return { success: true };
+      }),
+    gerarRecibo: managementProcedure.input(z.object({ recebimentoId: z.number().int().positive() }))
+      .query(async ({ input, ctx }) => {
+        const db = requireDatabase(await getDb());
+        
+        // Buscar recebimento
+        const receipt = (await db.select().from(recebimentos).where(and(eq(recebimentos.id, input.recebimentoId), eq(recebimentos.clinicaId, ctx.clinicaId))).limit(1))[0];
+        if (!receipt || receipt.estornadoEm) throw new TRPCError({ code: "NOT_FOUND", message: "Recebimento não encontrado." });
+
+        // Buscar conta a receber
+        const conta = (await db.select().from(contasReceber).where(eq(contasReceber.id, receipt.contaReceberId)).limit(1))[0];
+        if (!conta) throw new TRPCError({ code: "NOT_FOUND", message: "Conta a receber não encontrada." });
+
+        // Buscar informações da clínica
+        const clinica = (await db.select().from(clinicas).where(eq(clinicas.id, ctx.clinicaId)).limit(1))[0];
+        const settings = (await db.select().from(clinicSettings).where(eq(clinicSettings.clinicaId, ctx.clinicaId)).limit(1))[0];
+
+        // Buscar cliente
+        const cliente = (await db.select().from(clientes).where(eq(clientes.id, receipt.clienteId)).limit(1))[0];
+        if (!cliente) throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
+
+        // Buscar sessão e serviço
+        const sessao = conta.sessaoId ? (await db.select().from(sessoes).where(eq(sessoes.id, conta.sessaoId)).limit(1))[0] : null;
+        const servico = sessao ? (await db.select().from(servicos).where(eq(servicos.id, sessao.servicoId)).limit(1))[0] : null;
+        
+        // Buscar profissional
+        const profissional = sessao ? (await db.select().from(users).where(eq(users.id, sessao.profissionalId)).limit(1))[0] : null;
+
+        // Buscar todos os pagamentos da conta
+        const todosPagamentos = await db.select().from(recebimentos).where(and(eq(recebimentos.contaReceberId, conta.id), isNull(recebimentos.estornadoEm)));
+        const totalPago = todosPagamentos.reduce((sum, r) => sum + Number(r.valor), 0);
+        const valorFinalNum = Number(conta.valorFinal);
+        const saldoRestante = Math.max(0, valorFinalNum - totalPago);
+        const tipoRecibo = saldoRestante <= 0.009 ? "TOTAL" as const : "PARCIAL" as const;
+
+        // Gerar número do recibo
+        const numeroRecibo = generateReceiptNumber(receipt.id);
+
+        // Preparar dados do recibo
+        const receiptData = {
+          clinica: {
+            nome: settings?.nome || clinica.nome,
+            razaoSocial: settings?.razaoSocial,
+            cnpj: settings?.cnpj,
+            endereco: settings?.endereco,
+            telefone: settings?.telefone,
+            email: settings?.email,
+            logoUrl: settings?.logoUrl
+          },
+          cliente: {
+            nome: cliente.nome,
+            cpf: cliente.cpfHash ? "***" + cliente.cpfHash.slice(-4) : undefined
+          },
+          profissional: {
+            nome: profissional?.name || "Profissional"
+          },
+          servico: {
+            nome: servico?.nome || conta.descricao,
+            descricao: servico?.descricao
+          },
+          sessao: {
+            dataAgendamento: new Date(sessao?.dataHoraInicio || conta.createdAt),
+            dataExecucao: sessao?.status === "CONCLUIDA" ? new Date(sessao.dataHoraFim) : undefined,
+            duracaoMin: servico?.duracaoMin || 60
+          },
+          pagamento: {
+            valor: Number(receipt.valor),
+            valorTotal: Number(conta.valorFinal),
+            totalPago,
+            saldoRestante,
+            tipoPagamento: receipt.tipoPagamento,
+            dataPagamento: new Date(receipt.createdAt),
+            formaPagamento: receipt.tipoPagamento,
+            observations: receipt.observacoes,
+            historico: todosPagamentos.map((item) => ({
+              valor: Number(item.valor),
+              tipoPagamento: item.tipoPagamento,
+              dataPagamento: new Date(item.createdAt),
+              statusLiquidacao: item.statusLiquidacao,
+            })),
+          },
+          recibo: {
+            numero: numeroRecibo,
+            dataEmissao: new Date(),
+            tipo: tipoRecibo,
+          }
+        };
+
+        // Gerar HTML do recibo
+        const receiptHTML = generateReceiptHTML(receiptData);
+
+        return {
+          html: receiptHTML,
+          numero: numeroRecibo,
+          tipo: tipoRecibo,
+          totalPago,
+          saldoRestante,
+          valorTotal: valorFinalNum,
+          fileName: `recibo_${numeroRecibo}.html`
+        };
       }),
     despesas: managementProcedure.query(async ({ ctx }) => requireDatabase(await getDb()).select().from(despesas).where(eq(despesas.clinicaId, ctx.clinicaId)).orderBy(desc(despesas.dataCompetencia))),
     criarDespesa: adminOnlyProcedure.input(z.object({ descricao: z.string().trim().min(3), categoria: z.string().trim().min(2).max(100), valor: money, dataCompetencia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }))

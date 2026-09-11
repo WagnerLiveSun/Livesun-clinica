@@ -462,6 +462,7 @@ export const clinicSettings = mysqlTable("clinic_settings", {
   telefone: varchar("telefone", { length: 32 }),
   whatsapp: varchar("whatsapp", { length: 32 }),
   cnpj: varchar("cnpj", { length: 32 }),
+  email: varchar("email", { length: 320 }),
   emailContato: varchar("emailContato", { length: 320 }),
   atualizadoPor: int("atualizadoPor"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
