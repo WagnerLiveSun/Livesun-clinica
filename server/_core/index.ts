@@ -11,6 +11,7 @@ import { dispatchDueReminderEmails } from "../reminders";
 import { serveStatic, setupVite } from "./vite";
 import { registerCentralLinkRoute } from "../centralLinkRoute";
 import { deliverPendingRegistrations } from "../centralRegistrationOutbox";
+import { shouldDispatchCentralOutbox } from "../centralOutboxConfig";
 import { registrationConfig } from "../registrationConfig";
 import { registerCentralCompanies } from "../centralCompanies";
 import { registerPublicRegistrationRoute } from "../publicRegistrationRoute";
@@ -90,7 +91,7 @@ async function startServer() {
     if (ENV.reminderIntervalMs > 0) {
       setInterval(() => { void dispatchDueReminderEmails().catch((error) => console.error("[Lembretes] Falha no scheduler interno:", error)); }, ENV.reminderIntervalMs);
     }
-    if (process.env.CENTRAL_ENABLED === "true") {
+    if (shouldDispatchCentralOutbox()) {
       const dispatch = () => deliverPendingRegistrations({ baseUrl: process.env.CENTRAL_BASE_URL ?? "", apiToken: process.env.CENTRAL_API_TOKEN ?? "", environment: process.env.NODE_ENV ?? "production", allowLocalHttp: process.env.CENTRAL_ALLOW_LOCAL_HTTP === "true" }).catch(() => console.error("[Central] Falha no processamento de cadastros."));
       void dispatch();
       setInterval(() => void dispatch(), 60000);

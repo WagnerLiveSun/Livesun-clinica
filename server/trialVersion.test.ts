@@ -13,7 +13,7 @@ describe("identificação da versão do trial", () => {
       if (!address || typeof address === "string") throw new Error("porta indisponível");
       const response = await fetch(`http://127.0.0.1:${address.port}/api/status/trial`);
       expect(response.headers.get("cache-control")).toBe("no-store");
-      expect(await response.json()).toEqual({ trialVersion: "20261125-1", welcomeVersion: "20261125-1", supportVersion: "20261125-1" });
+      expect(await response.json()).toEqual({ trialVersion: "20261125-1", welcomeVersion: "20261125-1", supportVersion: "20261125-1", outboxConfigVersion: "20261125-1" });
     } finally {
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     }

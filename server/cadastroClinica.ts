@@ -11,6 +11,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import { sendRegistrationEmail } from "./registrationEmail";
 import { registrationConfig } from "./registrationConfig";
 import { deliverPendingRegistrations } from "./centralRegistrationOutbox";
+import { shouldDispatchCentralOutbox } from "./centralOutboxConfig";
 
 function validateDocument(value: string) {
   if (!/^\d{11}$|^\d{14}$/.test(value) || /^(\d)\1+$/.test(value)) return false;
@@ -133,7 +134,7 @@ export const cadastroClinicaRouter = router({
       await tx.insert(solicitacoesCentral).values({ cadastroId: registration.id, empresaId: clinicaId, eventoId, payload: JSON.stringify({ evento_id: eventoId, empresa_id: clinicaId, razao_social: registration.empresa, nome_fantasia: registration.empresa, cnpj_cpf: registration.documento, email: registration.email, telefone: registration.telefone, responsavel: registration.nome }) });
       return { success: true as const, clinicaSlug: slug, liberado: false as const };
     });
-    if (process.env.CENTRAL_ENABLED === "true") {
+    if (shouldDispatchCentralOutbox()) {
       void deliverPendingRegistrations({ baseUrl: process.env.CENTRAL_BASE_URL ?? "", apiToken: process.env.CENTRAL_API_TOKEN ?? "", environment: process.env.NODE_ENV ?? "production", allowLocalHttp: process.env.CENTRAL_ALLOW_LOCAL_HTTP === "true" }).catch(() => console.error("[Central] Falha no envio de cadastro."));
     }
     return result;
