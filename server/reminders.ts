@@ -116,7 +116,7 @@ export async function dispatchDueReminderEmails() {
 
   for (const reminder of due) {
     if (reminder.canal === "INTERNO") { skipped += 1; continue; }
-    if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(reminder.clinicaId))) { skipped += 1; continue; }
+    if (!(await clinicCommercialAccess(reminder.clinicaId))) { skipped += 1; continue; }
     const claimed = await db.update(lembretes).set({ enviadoEm: new Date(), tentativas: sql`${lembretes.tentativas} + 1` })
       .where(and(eq(lembretes.id, reminder.id), eq(lembretes.status, "PENDENTE"), isNull(lembretes.enviadoEm)));
     if (!claimed[0].affectedRows) { skipped += 1; continue; }

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 const { getDb } = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb }));
+const { trialAccess } = vi.hoisted(() => ({ trialAccess: vi.fn() }));
+vi.mock("./clinicTrial", () => ({ trialAccess }));
 import { clinicCommercialAccess } from "./centralAccess";
 
 const future = new Date(Date.now() + 600000);
@@ -12,8 +14,7 @@ function database(payload: unknown) {
 }
 describe("autorização comercial", () => {
   afterEach(() => { delete process.env.CENTRAL_ENABLED; vi.clearAllMocks(); });
-  it("nega ausência de integração ou vínculo", async () => {
-    expect(await clinicCommercialAccess(7)).toBe(false);
+  it("nega indisponibilidade do banco", async () => {
     process.env.CENTRAL_ENABLED = "true";
     getDb.mockResolvedValue(null);
     expect(await clinicCommercialAccess(7)).toBe(false);
@@ -22,6 +23,19 @@ describe("autorização comercial", () => {
     process.env.CENTRAL_ENABLED = "true";
     getDb.mockResolvedValue(database(snapshot(true)));
     expect(await clinicCommercialAccess(7)).toBe(true);
+    getDb.mockResolvedValue(database(snapshot(false)));
+    expect(await clinicCommercialAccess(7)).toBe(false);
+  });
+  it("permite trial vigente apenas sem vínculo e não renova após vencimento", async () => {
+    process.env.CENTRAL_ENABLED = "true";
+    getDb.mockResolvedValue({ select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }) });
+    trialAccess.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    expect(await clinicCommercialAccess(7)).toBe(true);
+    expect(await clinicCommercialAccess(7)).toBe(false);
+  });
+  it("vínculo suspenso do Central prevalece sobre trial", async () => {
+    process.env.CENTRAL_ENABLED = "true";
+    trialAccess.mockResolvedValue(true);
     getDb.mockResolvedValue(database(snapshot(false)));
     expect(await clinicCommercialAccess(7)).toBe(false);
   });

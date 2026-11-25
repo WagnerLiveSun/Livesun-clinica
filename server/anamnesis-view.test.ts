@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("./centralAccess", () => ({ clinicCommercialAccess: vi.fn(async () => true) }));
 import { formatAnamnesisAnswer } from "../client/src/lib/anamnesis";
 import { appRouter } from "./routers";
 

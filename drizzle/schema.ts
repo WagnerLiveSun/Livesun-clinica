@@ -1,6 +1,7 @@
 import {
   boolean,
   decimal,
+  datetime,
   index,
   int,
   mysqlEnum,
@@ -70,6 +71,13 @@ export const centralTenants = mysqlTable("central_tenants", {
   versao: int("versao").notNull(),
   validoAte: timestamp("valido_ate").notNull(),
   atualizadoEm: timestamp("atualizado_em").defaultNow().notNull(),
+});
+
+/** Trial concedido somente ao autocadastro; o prazo começa no primeiro login. */
+export const clinicasTrial = mysqlTable("clinicas_trial", {
+  clinicaId: int("clinica_id").primaryKey(),
+  usuarioId: int("usuario_id").notNull().unique(),
+  iniciadoEm: datetime("iniciado_em"),
 });
 
 export const centralEventosRecebidos = mysqlTable("central_eventos_recebidos", {

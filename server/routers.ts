@@ -49,6 +49,7 @@ import { clinicBrevoConfig, decryptSecret, encryptSecret, maskSecret } from "./b
 import { generateReceiptHTML, generateReceiptNumber } from "./receiptGenerator";
 import { cadastroClinicaRouter } from "./cadastroClinica";
 import { clinicCommercialAccess } from "./centralAccess";
+import { startClinicTrial } from "./clinicTrial";
 
 const roles = z.enum(["master", "user", "admin", "recepcao", "profissional", "cliente"]);
 const sessionStatus = z.enum([
@@ -208,7 +209,7 @@ async function resolvePublicBookingSession(token: string, clinicaSlug: string) {
   if (!bookingSession) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sua sessão de agendamento expirou. Refaça o cadastro para continuar." });
   const clinic = (await db.select({ id: clinicas.id }).from(clinicas).where(and(eq(clinicas.id, bookingSession.clinicaId), eq(clinicas.slug, clinicaSlug), eq(clinicas.ativa, true))).limit(1))[0];
   if (!clinic) throw new TRPCError({ code: "FORBIDDEN", message: "A sessão não pertence a esta clínica ou o link não está mais disponível." });
-  if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(clinic.id))) throw new TRPCError({ code: "FORBIDDEN", message: "Agendamento indisponível para esta clínica." });
+  if (!(await clinicCommercialAccess(clinic.id))) throw new TRPCError({ code: "FORBIDDEN", message: "Agendamento indisponível para esta clínica." });
   const client = (await db.select().from(clientes).where(and(eq(clientes.id, bookingSession.clienteId), eq(clientes.clinicaId, bookingSession.clinicaId))).limit(1))[0];
   if (!client || client.clinicaId !== bookingSession.clinicaId || client.status !== "ATIVO") throw new TRPCError({ code: "FORBIDDEN", message: "Este cadastro não está disponível para agendamento." });
   return { db, bookingSession, client };
@@ -218,7 +219,7 @@ async function resolvePublicClinic(clinicaSlug: string) {
   const db = requireDatabase(await getDb());
   const clinic = (await db.select().from(clinicas).where(and(eq(clinicas.slug, clinicaSlug), eq(clinicas.ativa, true))).limit(1))[0];
   if (!clinic) throw new TRPCError({ code: "NOT_FOUND", message: "Clínica não encontrada ou indisponível para agendamento on-line." });
-  if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(clinic.id))) throw new TRPCError({ code: "FORBIDDEN", message: "Agendamento indisponível para esta clínica." });
+  if (!(await clinicCommercialAccess(clinic.id))) throw new TRPCError({ code: "FORBIDDEN", message: "Agendamento indisponível para esta clínica." });
   return { db, clinic };
 }
 
@@ -312,7 +313,8 @@ export const appRouter = router({
       if (!user?.ativo || !user.passwordHash || !(await bcrypt.compare(input.password, user.passwordHash))) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "E-mail ou senha inválidos." });
       }
-      if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(user.clinicaId ?? 0))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
+      await startClinicTrial(user.clinicaId ?? 0, user.id);
+      if (!(await clinicCommercialAccess(user.clinicaId ?? 0))) throw new TRPCError({ code: "FORBIDDEN", message: "O período de experiência terminou ou a assinatura não está ativa." });
       const db = requireDatabase(await getDb());
       await db.update(users).set({ lastSignedIn: new Date(), loginMethod: "local" }).where(eq(users.id, user.id));
       const token = await createLocalSessionToken(user.id);

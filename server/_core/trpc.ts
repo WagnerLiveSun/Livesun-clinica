@@ -32,7 +32,7 @@ const requireUser = t.middleware(async opts => {
   }
 
   const clinicId = resolveClinicaId(ctx, ctx.user);
-  if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(clinicId))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
+  if (!(await clinicCommercialAccess(clinicId))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
 
   return next({
     ctx: {
@@ -53,7 +53,7 @@ export const adminProcedure = t.procedure.use(
     if (!ctx.user || (ctx.user.role !== 'admin' && ctx.user.role !== 'master')) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
-    if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(resolveClinicaId(ctx, ctx.user)))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
+    if (!(await clinicCommercialAccess(resolveClinicaId(ctx, ctx.user)))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
     
     const isMaster = ctx.user.role === 'master';
     if (!isMaster && !ctx.user.clinicaId) {

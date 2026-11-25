@@ -14,6 +14,7 @@ import { deliverPendingRegistrations } from "../centralRegistrationOutbox";
 import { registrationConfig } from "../registrationConfig";
 import { registerCentralCompanies } from "../centralCompanies";
 import { registerPublicRegistrationRoute } from "../publicRegistrationRoute";
+import { registerTrialVersion } from "../trialVersion";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,6 +37,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
+  registerTrialVersion(app);
   const server = createServer(app);
   if (process.env.NODE_ENV === "production" && process.env.PUBLIC_REGISTRATION_ENABLED === "true") {
     const { problems } = registrationConfig(process.env);

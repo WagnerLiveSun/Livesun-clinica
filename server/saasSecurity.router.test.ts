@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("./centralAccess", () => ({ clinicCommercialAccess: vi.fn(async () => true) }));
 import { MySqlDialect } from "drizzle-orm/mysql-core";
 
 const { getDbMock } = vi.hoisted(() => ({ getDbMock: vi.fn() }));

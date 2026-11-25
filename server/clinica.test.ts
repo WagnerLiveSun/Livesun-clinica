@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("./centralAccess", () => ({ clinicCommercialAccess: vi.fn(async () => true) }));
 import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "../shared/const";
 import { appRouter, filterPendingQuestionnaires, formatAppointmentDateTime, hasScheduleConflict, publicAvailableSlots, publicBookingConfirmationMessage, publicBookingReminderMessage, reminderDeliveryUpdate, staffBookingReminderMessage } from "./routers";

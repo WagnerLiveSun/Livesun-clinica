@@ -3,14 +3,17 @@ import { centralTenants } from "../drizzle/schema";
 import { getDb } from "./db";
 import { entitlementSchema, shouldApplyEntitlement } from "./centralProtocol";
 import { centralOrigin } from "./centralRegistrationClient";
+import { trialAccess } from "./clinicTrial";
 
 /** Autorização comercial com cache persistente; sem estado válido, falha fechada. */
 export async function clinicCommercialAccess(clinicaId: number): Promise<boolean> {
-  if (process.env.CENTRAL_ENABLED !== "true") return false;
+  if (clinicaId === 0 && process.env.CENTRAL_ENABLED !== "true") return true;
   const db = await getDb();
   if (!db || !Number.isInteger(clinicaId) || clinicaId <= 0) return false;
+  const trial = await trialAccess(clinicaId);
   const tenant = (await db.select().from(centralTenants).where(eq(centralTenants.empresaId, clinicaId)).limit(1))[0];
-  if (!tenant) return false;
+  if (!tenant) return trial === null ? process.env.CENTRAL_ENABLED !== "true" : trial;
+  if (process.env.CENTRAL_ENABLED !== "true") return false;
   try {
     const cached = entitlementSchema.parse(JSON.parse(tenant.payload));
     if (tenant.validoAte.getTime() > Date.now() && Date.parse(cached.valido_ate) > Date.now()) return cached.acesso_produto && ["ATIVA", "TRIAL"].includes(cached.status);

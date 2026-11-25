@@ -35,7 +35,7 @@ export function registerStorageProxy(app: Express) {
           res.status(404).send("Storage object not found");
           return;
         }
-        if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(photo.clinicaId))) {
+        if (!(await clinicCommercialAccess(photo.clinicaId))) {
           res.status(403).send("Storage access denied");
           return;
         }
