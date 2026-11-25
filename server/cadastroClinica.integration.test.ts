@@ -168,4 +168,21 @@ describe.skipIf(process.env.RUN_CADASTRO_LOCAL_TESTS !== "1")("cadastro em banco
     expect(current.versao).toBe(2);
     expect(JSON.parse(current.payload).acesso_produto).toBe(false);
   });
+
+  it("vincula clínica existente sem exigir confirmação de e-mail e sem alterar seus usuários", async () => {
+    const db = (await getDb())!;
+    const suffix = randomBytes(6).toString("hex");
+    const [inserted] = await db.insert(clinicas).values({ nome: "Clínica Legada", slug: `legada-${suffix}`, ativa: true });
+    const clinicId = Number(inserted.insertId);
+    await db.insert(clinicSettings).values({ clinicaId: clinicId, nome: "Clínica Legada", cnpj: "529.982.247-25", emailContato: `legada-${suffix}@example.test` });
+    const [created] = await db.insert(users).values({ clinicaId: clinicId, openId: `local:legacy-${suffix}`, name: "Gestor Legado", email: `gestor-${suffix}@example.test`, role: "admin", ativo: true });
+    const generated = new Date();
+    const entitlement = { cliente_id: String(clinicId + 100000), produto: "CLINICAS", assinatura_id: clinicId + 200000, status: "ATIVA", plano: "TESTE", acesso_produto: true, modulos: [], limites: {}, versao: 1, gerado_em: generated.toISOString(), valido_ate: new Date(generated.getTime() + 900_000).toISOString() };
+    const payload = { produto: "CLINICAS", empresa_id: clinicId, cliente_id: clinicId + 100000, assinatura_id: entitlement.assinatura_id, solicitacao_id: clinicId + 300000, evento_id: (await import("./centralRegistrationClient")).centralRegistrationEvent(clinicId), status: "VINCULO_PENDENTE", cnpj_cpf: "52998224725", entitlements: entitlement };
+    expect(await applyCentralLink({ ...payload, cnpj_cpf: "11222333000181" })).toEqual({ status: 409 });
+    expect(await applyCentralLink(payload)).toMatchObject({ status: 200, resultado: "vinculado" });
+    expect(await applyCentralLink(payload)).toMatchObject({ status: 200, resultado: "duplicado" });
+    expect((await db.select().from(users).where(eq(users.id, Number(created.insertId))).limit(1))[0].ativo).toBe(true);
+    expect((await db.select().from(solicitacoesClinica).where(eq(solicitacoesClinica.clinicaId, clinicId)))).toHaveLength(0);
+  });
 });

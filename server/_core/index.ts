@@ -12,6 +12,7 @@ import { serveStatic, setupVite } from "./vite";
 import { registerCentralLinkRoute } from "../centralLinkRoute";
 import { deliverPendingRegistrations } from "../centralRegistrationOutbox";
 import { registrationConfig } from "../registrationConfig";
+import { registerCentralCompanies } from "../centralCompanies";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -41,6 +42,7 @@ async function startServer() {
   }
   const testDatabase = (() => { try { const url = new URL(process.env.DATABASE_URL ?? ""); return url.protocol === "mysql:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.pathname === "/clinica_cadastro_duplo_homologacao_20261124"; } catch { return false; } })();
   registerCentralLinkRoute(app, process.env.CENTRAL_WEBHOOK_SECRET ?? "", process.env.CENTRAL_ENABLED === "true" || (process.env.NODE_ENV !== "production" && process.env.CLINICA_CADASTRO_HOMOLOGACAO === "1" && testDatabase));
+  registerCentralCompanies(app, process.env.CENTRAL_WEBHOOK_SECRET ?? "", process.env.CENTRAL_ENABLED === "true");
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
