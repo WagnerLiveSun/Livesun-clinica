@@ -42,7 +42,10 @@ function registrationMode() {
     const baseUrl = process.env.PUBLIC_BASE_URL ?? "";
     const apiKey = process.env.BREVO_API_KEY ?? "";
     const { problems, fromEmail } = registrationConfig(process.env);
-    if (problems.length) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cadastro indisponível. Tente novamente mais tarde." });
+    if (problems.length) {
+      console.error(`[Cadastro] Configuração inválida: ${problems.join(", ")}.`);
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cadastro indisponível. Tente novamente mais tarde." });
+    }
     return { local: false as const, baseUrl, apiKey, fromEmail };
   }
   requireHomologation();

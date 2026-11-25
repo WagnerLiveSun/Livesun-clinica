@@ -32,6 +32,7 @@ export function registerPublicRegistrationRoute(app: Express, allowedOrigins = [
       } catch (error) {
         const known = error instanceof TRPCError;
         const status = known && error.code === "BAD_REQUEST" ? 400 : known && error.code === "CONFLICT" ? 409 : 503;
+        if (status === 503) console.error(`[Cadastro público] ${action}: ${known && error.code === "SERVICE_UNAVAILABLE" ? "configuracao_indisponivel" : known && error.code === "FORBIDDEN" ? "cadastro_desabilitado" : "falha_interna_ou_banco"}.`);
         const message = status === 400 ? "Dados inválidos ou link expirado. Confira e tente novamente." : status === 409 ? "Não foi possível concluir o cadastro. Entre em contato com a LiveSun." : "Cadastro temporariamente indisponível. Tente novamente mais tarde.";
         return res.status(status).json({ error: message });
       }

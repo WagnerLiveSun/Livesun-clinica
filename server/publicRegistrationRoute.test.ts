@@ -1,5 +1,6 @@
 import express from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TRPCError } from "@trpc/server";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("./cadastroClinica", () => ({ cadastroClinicaRouter: { createCaller: () => ({ solicitar: invoke, reenviar: invoke, confirmar: invoke, concluir: invoke }) } }));
 import { registerPublicRegistrationRoute } from "./publicRegistrationRoute";
@@ -38,5 +39,16 @@ describe("API pública da landing institucional", () => {
     const failure = await fetch(base + "/api/public/cadastro-clinica/concluir", options);
     expect(failure.status).toBe(503);
     expect(await failure.text()).not.toContain("segredo-interno");
+  });
+  it("registra apenas categoria segura quando há falha de configuração", async () => {
+    const base = await start();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      invoke.mockRejectedValueOnce(new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "segredo-nao-exibir" }));
+      const response = await fetch(base + "/api/public/cadastro-clinica/solicitar", { method: "POST", headers: { Origin: "https://livesun.com.br", "Content-Type": "application/json" }, body: "{}" });
+      expect(response.status).toBe(503);
+      expect(log).toHaveBeenCalledWith("[Cadastro público] solicitar: configuracao_indisponivel.");
+      expect(JSON.stringify(log.mock.calls)).not.toContain("segredo-nao-exibir");
+    } finally { log.mockRestore(); }
   });
 });
