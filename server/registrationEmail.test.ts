@@ -8,7 +8,7 @@ describe("confirmação de cadastro por e-mail", () => {
     const [url, options] = fetcher.mock.calls[0];
     expect(url).toBe("https://api.brevo.com/v3/smtp/email");
     const body = JSON.parse(String(options?.body));
-    expect(body.htmlContent).toContain("https://clinicas.example/lp/clinicas?confirmar=");
+    expect(body.htmlContent).toContain("https://livesun.com.br/lp/clinicas?confirmar=");
     expect(body.htmlContent).toContain("Gestora &lt;A&gt;");
     expect(body.htmlContent).not.toContain("Gestora <A>");
   });

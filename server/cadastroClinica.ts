@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, isNull, lte } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
@@ -89,7 +89,10 @@ export const cadastroClinicaRouter = router({
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Banco indisponível." });
     const result = await db.update(solicitacoesClinica).set({ emailConfirmadoEm: new Date() }).where(and(eq(solicitacoesClinica.tokenHash, tokenHash(input.token)), isNull(solicitacoesClinica.emailConfirmadoEm), gt(solicitacoesClinica.tokenExpiraEm, new Date())));
-    if (result[0].affectedRows !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Link inválido, expirado ou já utilizado." });
+    if (result[0].affectedRows !== 1) {
+      const confirmed = (await db.select({ id: solicitacoesClinica.id }).from(solicitacoesClinica).where(and(eq(solicitacoesClinica.tokenHash, tokenHash(input.token)), isNotNull(solicitacoesClinica.emailConfirmadoEm), gt(solicitacoesClinica.tokenExpiraEm, new Date()), isNull(solicitacoesClinica.clinicaId), isNull(solicitacoesClinica.usuarioId))).limit(1))[0];
+      if (!confirmed) throw new TRPCError({ code: "BAD_REQUEST", message: "Link inválido, expirado ou já utilizado." });
+    }
     return { success: true } as const;
   }),
   reenviar: publicProcedure.input(z.object({ email: z.string().trim().email().max(320).transform(value => value.toLowerCase()) })).mutation(async ({ input }) => {

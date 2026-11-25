@@ -10,7 +10,8 @@ export async function sendRegistrationEmail(input: {
   const sender = z.string().email().parse(input.fromEmail);
   if (!input.apiKey || !/^[A-Za-z0-9_-]{43}$/.test(input.token)) throw new Error("Configuração de e-mail de cadastro inválida.");
   const origin = centralOrigin(input.baseUrl, { environment: input.environment, allowLocalHttp: input.allowLocalHttp });
-  const link = `${origin}/lp/clinicas?confirmar=${encodeURIComponent(input.token)}#cadastro`;
+  const landingOrigin = input.environment === "production" ? "https://livesun.com.br" : origin;
+  const link = `${landingOrigin}/lp/clinicas?confirmar=${encodeURIComponent(input.token)}#cadastro`;
   const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);

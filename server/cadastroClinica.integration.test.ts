@@ -24,7 +24,7 @@ describe.skipIf(process.env.RUN_CADASTRO_LOCAL_TESTS !== "1")("cadastro em banco
     const result = await caller.solicitar(form);
     expect(result.confirmacaoLocal).toHaveLength(43);
     await expect(caller.confirmar({ token: result.confirmacaoLocal })).resolves.toEqual({ success: true });
-    await expect(caller.confirmar({ token: result.confirmacaoLocal })).rejects.toThrow("já utilizado");
+    await expect(caller.confirmar({ token: result.confirmacaoLocal })).resolves.toEqual({ success: true });
     await expect(caller.solicitar(form)).rejects.toThrow("Já existe");
   });
 
