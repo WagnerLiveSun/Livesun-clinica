@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ReceiptGenerator } from "@/components/ReceiptGenerator";
+import { TrialWelcome } from "@/components/TrialWelcome";
 import {
   Activity, CalendarDays, Check, ChevronRight, CircleDollarSign, ClipboardList,
   FilePlus2, Files, HeartPulse, ImagePlus, LayoutDashboard, LogOut, Menu,
@@ -491,6 +492,7 @@ export default function Home() {
     <div className="dashboard-area">
       <header className="mobile-topbar"><Button variant="ghost" size="icon" onClick={() => setMobileMenu(true)}><Menu /></Button><div className="brand-lockup"><div className="brand-mark">{clinicLogo ? <img src={clinicLogo} alt="Logo" className="w-full h-full object-cover rounded-full" /> : <Sparkles />}</div><div className="brand-copy"><strong>{clinicName}</strong><span className="text-xs text-muted-foreground font-medium">Sistema SunSet</span></div></div></header>
       <main className="dashboard-main">
+        {role === "admin" && <TrialWelcome key={user.id} userId={user.id} />}
         {section === "inicio" && <>
           <SectionHeader eyebrow="PAINEL OPERACIONAL" title="Bom dia, sua clínica está em movimento." description="Acompanhe os indicadores e prioridades da operação de hoje." action={<div className="header-actions">{isManager && <Button variant="outline" onClick={() => setShowClientForm(true)}><Users /> Novo cliente</Button>}<Button className="primary-action" onClick={() => setShowSessionForm(true)}><Plus /> Agendamento</Button></div>} />
           <div className="metric-grid"><Metric icon={CircleDollarSign} label="Faturamento do mês" value={currency(statsQuery.data?.faturamentoMes)} /><Metric icon={CalendarDays} label="Agenda de hoje" value={String(statsQuery.data?.agendamentosHoje ?? 0)} /><Metric icon={Activity} label="Taxa de ocupação" value={`${statsQuery.data?.taxaOcupacao ?? 0}%`} /><Metric icon={Users} label="Clientes ativos" value={String(statsQuery.data?.clientesTotal ?? 0)} /></div>

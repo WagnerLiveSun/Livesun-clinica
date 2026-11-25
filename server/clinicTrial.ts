@@ -21,3 +21,21 @@ export async function trialAccess(clinicaId: number): Promise<boolean | null> {
     .from(clinicasTrial).where(eq(clinicasTrial.clinicaId, clinicaId)).limit(1))[0];
   return row ? Number(row.vigente) === 1 : null;
 }
+
+/** Exibe apenas o trial local vigente e ainda não substituído por vínculo comercial. */
+export async function getClinicTrialInfo(clinicaId: number) {
+  if (!Number.isInteger(clinicaId) || clinicaId <= 0) return null;
+  const db = await getDb();
+  if (!db) throw new Error("Banco indisponível");
+  const rows = await db.select({
+    endsAt: sql<string>`DATE_FORMAT(DATE_ADD(${clinicasTrial.iniciadoEm}, INTERVAL 7 DAY), '%Y-%m-%dT%H:%i:%sZ')`,
+    secondsRemaining: sql<number>`TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), DATE_ADD(${clinicasTrial.iniciadoEm}, INTERVAL 7 DAY))`,
+  }).from(clinicasTrial).where(and(
+    eq(clinicasTrial.clinicaId, clinicaId),
+    sql`${clinicasTrial.iniciadoEm} IS NOT NULL AND ${clinicasTrial.iniciadoEm} <= UTC_TIMESTAMP() AND DATE_ADD(${clinicasTrial.iniciadoEm}, INTERVAL 7 DAY) > UTC_TIMESTAMP()`,
+    sql`NOT EXISTS (SELECT 1 FROM ${centralTenants} WHERE ${centralTenants.empresaId} = ${clinicaId})`,
+  )).limit(1);
+  const row = rows[0];
+  if (!row || !Number.isFinite(Number(row.secondsRemaining)) || Number(row.secondsRemaining) <= 0) return null;
+  return { endsAt: row.endsAt, secondsRemaining: Number(row.secondsRemaining) };
+}

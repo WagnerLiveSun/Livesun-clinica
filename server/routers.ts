@@ -49,7 +49,7 @@ import { clinicBrevoConfig, decryptSecret, encryptSecret, maskSecret } from "./b
 import { generateReceiptHTML, generateReceiptNumber } from "./receiptGenerator";
 import { cadastroClinicaRouter } from "./cadastroClinica";
 import { clinicCommercialAccess } from "./centralAccess";
-import { startClinicTrial } from "./clinicTrial";
+import { getClinicTrialInfo, startClinicTrial } from "./clinicTrial";
 
 const roles = z.enum(["master", "user", "admin", "recepcao", "profissional", "cliente"]);
 const sessionStatus = z.enum([
@@ -302,6 +302,10 @@ export const appRouter = router({
   cadastroClinica: cadastroClinicaRouter,
   system: systemRouter,
   auth: router({
+    trialStatus: protectedProcedure.query(async ({ ctx }) => {
+      if (ctx.user.role !== "admin") return null;
+      return getClinicTrialInfo(ctx.clinicaId);
+    }),
     me: publicProcedure.query(({ ctx }) => ctx.user ? {
       id: ctx.user.id,
       name: ctx.user.name,
