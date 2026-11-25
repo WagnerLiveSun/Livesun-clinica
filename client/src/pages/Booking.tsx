@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { ArrowLeft, CalendarDays, Check, ChevronRight, Clock3, HeartPulse, Mail, MessageCircle, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
 import { toast } from "sonner";
 
 type ContactChannel = "EMAIL" | "WHATSAPP" | "SMS";
@@ -55,14 +55,18 @@ function BookingProgress({ step }: { step: number }) {
   </ol>;
 }
 
-function readClinicaParam(): string | null {
-  if (typeof window === "undefined") return null;
-  const value = new URLSearchParams(window.location.search).get("clinica")?.trim().toLowerCase();
+function readClinicaParam(search: string): string | null {
+  const value = new URLSearchParams(search).get("clinica")?.trim().toLowerCase();
   return value || null;
 }
 
 export default function Booking() {
-  const clinicaSlug = useMemo(readClinicaParam, []);
+  const search = useSearch();
+  const clinicaSlug = useMemo(() => readClinicaParam(search), [search]);
+  return <BookingClinic key={clinicaSlug ?? "sem-clinica"} clinicaSlug={clinicaSlug} />;
+}
+
+function BookingClinic({ clinicaSlug }: { clinicaSlug: string | null }) {
   const bookingStorageKey = `sunset-public-booking-token:${clinicaSlug ?? ""}`;
   const [step, setStep] = useState(() => (clinicaSlug ? (typeof window !== "undefined" && sessionStorage.getItem(`sunset-public-booking-token:${clinicaSlug}`) ? 2 : 1) : 1));
   const [bookingToken, setBookingToken] = useState(() => (clinicaSlug && typeof window !== "undefined" ? sessionStorage.getItem(`sunset-public-booking-token:${clinicaSlug}`) : null));
@@ -76,8 +80,8 @@ export default function Booking() {
   const [selectedTime, setSelectedTime] = useState("");
 
   const clinicSettingsQuery = trpc.settings.get.useQuery({ clinicaSlug: clinicaSlug ?? "" }, { enabled: Boolean(clinicaSlug) });
-  const optionsQuery = trpc.agendamentoPublico.opcoes.useQuery({ clinicaSlug: clinicaSlug ?? "" }, { enabled: Boolean(clinicaSlug) });
-  const questionnairesQuery = trpc.agendamentoPublico.questionarios.useQuery({ token: bookingToken ?? "" }, { enabled: Boolean(bookingToken) });
+  const optionsQuery = trpc.agendamentoPublico.opcoes.useQuery({ clinicaSlug: clinicaSlug ?? "" }, { enabled: Boolean(clinicaSlug && clinicSettingsQuery.isSuccess) });
+  const questionnairesQuery = trpc.agendamentoPublico.questionarios.useQuery({ token: bookingToken ?? "", clinicaSlug: clinicaSlug ?? "" }, { enabled: Boolean(bookingToken && clinicaSlug && clinicSettingsQuery.isSuccess) });
   const availabilityQuery = trpc.agendamentoPublico.disponibilidade.useQuery(
     { clinicaSlug: clinicaSlug ?? "", profissionalId: Number(selectedProfessionalId || 0), servicoId: Number(selectedServiceId || 0), data: selectedDate },
     { enabled: Boolean(clinicaSlug) && Boolean(selectedProfessionalId) && Boolean(selectedServiceId) && Boolean(selectedDate) },
@@ -120,7 +124,7 @@ export default function Booking() {
   const services = optionsQuery.data?.servicos ?? [];
   const professionals = optionsQuery.data?.profissionais ?? [];
   const selectedService = services.find((service) => service.id === Number(selectedServiceId));
-  const clinicName = clinicSettingsQuery.data?.nome ?? "SunSet";
+  const clinicName = clinicSettingsQuery.data?.nome ?? "";
   const clinicSlogan = clinicSettingsQuery.data?.slogan ?? "Seu cuidado, seu momento";
   const clinicLogo = clinicSettingsQuery.data?.logoUrl;
   const enabledProfessionalIds = useMemo(() => {
@@ -135,13 +139,11 @@ export default function Booking() {
   const availableSlots = availabilityQuery.data?.slots ?? [];
   const selectedTimeUnavailable = Boolean(selectedTime && !availableSlots.some((slot) => slot.hora === selectedTime));
 
-  useEffect(() => {
-    const primaryColor = clinicSettingsQuery.data?.corPrimaria;
-    if (!primaryColor) return;
-    document.documentElement.style.setProperty("--primary", primaryColor);
-    document.documentElement.style.setProperty("--rose-500", primaryColor);
-    document.documentElement.style.setProperty("--rose-600", primaryColor);
-  }, [clinicSettingsQuery.data?.corPrimaria]);
+  const configuredColor = clinicSettingsQuery.data?.corPrimaria;
+  const primaryColor = configuredColor && /^#[0-9a-fA-F]{6}$/.test(configuredColor) ? configuredColor : "#C8627A";
+  const colorRgb = [1, 3, 5].map(offset => parseInt(primaryColor.slice(offset, offset + 2), 16));
+  const foreground = (0.2126 * colorRgb[0] + 0.7152 * colorRgb[1] + 0.0722 * colorRgb[2]) / 255 > 0.58 ? "#261f1b" : "#ffffff";
+  const themeStyle = { "--primary": primaryColor, "--rose-500": primaryColor, "--rose-600": primaryColor, "--clinic-primary-foreground": foreground } as React.CSSProperties;
 
   useEffect(() => {
     if (selectedProfessionalId && !enabledProfessionalIds.has(Number(selectedProfessionalId))) setSelectedProfessionalId("");
@@ -176,17 +178,18 @@ export default function Booking() {
       if (question.tipoResposta === "SELECAO_MULTIPLA") return { perguntaId: question.id, respostaJson: Array.isArray(value) ? JSON.stringify(value) : undefined };
       return { perguntaId: question.id, respostaTexto: typeof value === "string" ? value : undefined };
     });
-    answerQuestionnaire.mutate({ token: bookingToken, questionarioId: questionnaire.id, declaracaoVeracidade: true, assinaturaDigital: signature, respostas: normalizedAnswers });
+    if (!clinicaSlug) return;
+    answerQuestionnaire.mutate({ token: bookingToken, clinicaSlug, questionarioId: questionnaire.id, declaracaoVeracidade: true, assinaturaDigital: signature, respostas: normalizedAnswers });
   }
 
   function submitBooking(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!bookingToken || !appointmentStart || !selectedServiceId || !selectedProfessionalId) return;
+    if (!clinicaSlug || !bookingToken || !appointmentStart || !selectedServiceId || !selectedProfessionalId) return;
     if (selectedTimeUnavailable) { toast.error("Esse horário não está mais disponível. Escolha outra opção."); return; }
-    requestBooking.mutate({ token: bookingToken, servicoId: Number(selectedServiceId), profissionalId: Number(selectedProfessionalId), dataHoraInicio: appointmentStart, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    requestBooking.mutate({ token: bookingToken, clinicaSlug, servicoId: Number(selectedServiceId), profissionalId: Number(selectedProfessionalId), dataHoraInicio: appointmentStart, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
   }
 
-  if (!clinicaSlug) {
+  if (!clinicaSlug || clinicSettingsQuery.isError) {
     return <main className="booking-shell">
       <header className="booking-header">
         <Link href="/" className="booking-back"><ArrowLeft aria-hidden="true" /> Área da clínica</Link>
@@ -211,7 +214,9 @@ export default function Booking() {
     </main>;
   }
 
-  return <main className="booking-shell">
+  if (clinicSettingsQuery.isLoading || !clinicSettingsQuery.data) return <main className="booking-shell"><p className="booking-loading">Carregando a clínica...</p></main>;
+
+  return <main className="booking-shell" style={themeStyle}>
     <header className="booking-header">
       <Link href="/" className="booking-back"><ArrowLeft aria-hidden="true" /> Área da clínica</Link>
       <div className="brand-lockup"><div className="brand-mark">{clinicLogo ? <img className="booking-clinic-logo" src={clinicLogo} alt="" /> : <Sparkles aria-hidden="true" />}</div><div className="brand-copy"><strong>{clinicName}</strong><span>Sistema SunSet · {clinicSlogan}</span></div></div>
@@ -244,7 +249,7 @@ export default function Booking() {
         </Card>}
 
         {step === 3 && <Card className="booking-card">
-          <CardHeader><p className="eyebrow">Etapa 3 de 4</p><CardTitle>Escolha sua solicitação</CardTitle><CardDescription>Selecione o serviço, o profissional e a melhor data e hora. A confirmação final é feita pela equipe SunSet.</CardDescription></CardHeader>
+          <CardHeader><p className="eyebrow">Etapa 3 de 4</p><CardTitle>Escolha sua solicitação</CardTitle><CardDescription>Selecione o serviço, o profissional e a melhor data e hora. A confirmação final é feita pela equipe da clínica.</CardDescription></CardHeader>
           <CardContent><form className="booking-form" onSubmit={submitBooking}>
             <div className="booking-field full"><Label>Serviço</Label><Select value={selectedServiceId} onValueChange={setSelectedServiceId}><SelectTrigger><SelectValue placeholder="Selecione o serviço" /></SelectTrigger><SelectContent>{services.map((service) => <SelectItem key={service.id} value={String(service.id)}>{service.nome} · {service.duracaoMin} min · {money(service.valor)}</SelectItem>)}</SelectContent></Select>{selectedService && <small>{selectedService.descricao || `Duração prevista: ${selectedService.duracaoMin} minutos.`}</small>}</div>
             <div className="booking-field"><Label>Profissional</Label><Select value={selectedProfessionalId} onValueChange={setSelectedProfessionalId} disabled={!selectedServiceId || optionsQuery.isLoading || optionsQuery.isError || professionalsUnavailable}><SelectTrigger aria-describedby="booking-professional-help"><SelectValue placeholder={!selectedServiceId ? "Escolha primeiro o serviço" : optionsQuery.isLoading ? "Carregando equipe..." : optionsQuery.isError ? "Equipe indisponível" : professionalsUnavailable ? "Nenhum profissional disponível" : "Selecione o profissional"} /></SelectTrigger><SelectContent>{availableProfessionals.map((professional) => <SelectItem key={professional.id} value={String(professional.id)}>{professional.nome || "Profissional não identificado"}</SelectItem>)}</SelectContent></Select><small id="booking-professional-help" className={professionalsUnavailable || optionsQuery.isError ? "booking-selection-warning" : undefined}>{!selectedServiceId ? "Escolha um serviço para visualizar a equipe disponível." : optionsQuery.isLoading ? "Carregando profissionais habilitados para este serviço." : optionsQuery.isError ? "Não foi possível carregar a equipe. Atualize a página e tente novamente." : professionalsUnavailable ? "Ainda não há profissional ativo vinculado a este serviço. A clínica deve cadastrar um usuário com o perfil Profissional e vinculá-lo ao serviço antes de publicar horários." : "Selecione quem realizará o atendimento."}</small></div>
@@ -255,7 +260,7 @@ export default function Booking() {
           </form></CardContent>
         </Card>}
 
-        {step === 4 && <Card className="booking-card booking-success"><CardContent><div className="success-icon"><Check aria-hidden="true" /></div><p className="eyebrow">Solicitação registrada</p><h1>Recebemos seu pedido de agendamento.</h1><p>A equipe SunSet verificará a agenda e enviará a confirmação pelo canal que você escolheu. Se precisar ajustar alguma informação, entre em contato diretamente com a clínica.</p><Link href={`/agendar?clinica=${clinicaSlug}`}><Button variant="outline" onClick={() => { setStep(1); setBookingToken(null); setQuestionnaireIndex(0); }}>Fazer novo agendamento</Button></Link></CardContent></Card>}
+        {step === 4 && <Card className="booking-card booking-success"><CardContent><div className="success-icon"><Check aria-hidden="true" /></div><p className="eyebrow">Solicitação registrada</p><h1>Recebemos seu pedido de agendamento.</h1><p>A equipe da clínica verificará a agenda e enviará a confirmação pelo canal que você escolheu. Se precisar ajustar alguma informação, entre em contato diretamente com a clínica.</p><Link href={`/agendar?clinica=${encodeURIComponent(clinicaSlug)}`}><Button variant="outline" onClick={() => { setStep(1); setBookingToken(null); setQuestionnaireIndex(0); }}>Fazer novo agendamento</Button></Link></CardContent></Card>}
       </div>
     </section>
     <footer className="booking-footer"><BrandCredit /></footer>

@@ -3,6 +3,7 @@ import { clientes, lembretes, sessoes, users } from "../drizzle/schema";
 import { getDb } from "./db";
 import { ENV } from "./_core/env";
 import { clinicBrevoConfig, environmentBrevoConfig, type BrevoConfig } from "./brevoConfig";
+import { clinicCommercialAccess } from "./centralAccess";
 
 type BrevoRecipient = { email: string; name?: string };
 type PhoneRecipient = { telefone: string; name?: string };
@@ -36,23 +37,26 @@ export function resolveReminderDeliveryChannel(channel: ReminderChannel, config 
 export function parseBrevoSender(raw: string) {
   const matched = raw.trim().match(/^(.*?)\s*<([^<>\s]+@[^<>\s]+)>$/);
   const email = matched?.[2] ?? raw.trim();
-  const name = matched?.[1]?.trim() || "SunSet";
+  const name = matched?.[1]?.trim() || "LiveSun Clínicas";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("BREVO_FROM_EMAIL não contém um remetente válido.");
   return { email, name };
 }
 
 export function buildBrevoReminderPayload(recipient: BrevoRecipient, content: string, config: BrevoConfig = environmentBrevoConfig()) {
+  const sender = { ...parseBrevoSender(config.fromEmail), ...(config.fromName ? { name: config.fromName } : {}) };
+  const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   return {
-    sender: { ...parseBrevoSender(config.fromEmail), ...(config.fromName ? { name: config.fromName } : {}) },
+    sender,
     ...(config.replyTo ? { replyTo: { email: config.replyTo } } : {}),
     to: [{ email: recipient.email, ...(recipient.name ? { name: recipient.name } : {}) }],
-    subject: "Lembrete de atendimento — SunSet",
+    subject: `Lembrete de atendimento — ${sender.name.replace(/[\r\n]/g, " ")}`,
     textContent: content,
-    htmlContent: `<div style="font-family:Arial,sans-serif;color:#2c2627;line-height:1.5"><p style="color:#8f3156;font-weight:700;letter-spacing:.08em">SUNSET</p><h1 style="font-family:Georgia,serif;font-size:24px">Lembrete de atendimento</h1><p>${content.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p><p style="color:#776d70;font-size:13px">Em caso de necessidade, entre em contato com a clínica.</p></div>`,
+    htmlContent: `<div style="font-family:Arial,sans-serif;color:#2c2627;line-height:1.5"><p style="color:#8f3156;font-weight:700;letter-spacing:.08em">${escape(sender.name)}</p><h1 style="font-family:Georgia,serif;font-size:24px">Lembrete de atendimento</h1><p>${escape(content)}</p><p style="color:#776d70;font-size:13px">Em caso de necessidade, entre em contato com a clínica.</p></div>`,
   };
 }
 
 export async function sendBrevoReminder(recipient: BrevoRecipient, content: string, config: BrevoConfig = environmentBrevoConfig()) {
+  if (!config.emailAtivo) throw new Error("E-mail não está ativo para esta clínica.");
   if (!config.apiKey) throw new Error("API key do Brevo não configurada.");
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
@@ -69,6 +73,7 @@ export function buildBrevoSmsPayload(recipient: PhoneRecipient, content: string,
 }
 
 export async function sendBrevoSms(recipient: PhoneRecipient, content: string, config: BrevoConfig = environmentBrevoConfig()) {
+  if (!config.smsAtivo) throw new Error("SMS não está ativo para esta clínica.");
   if (!config.apiKey) throw new Error("API key do Brevo não configurada.");
   const response = await fetch("https://api.brevo.com/v3/transactionalSMS/send", {
     method: "POST",
@@ -83,10 +88,11 @@ export function buildBrevoWhatsappPayload(recipient: PhoneRecipient, config: Bre
   if (!config.whatsappSender || !config.whatsappTemplateId) throw new Error("O remetente ou modelo WhatsApp do Brevo não está configurado.");
   const templateId = Number(config.whatsappTemplateId);
   if (!Number.isSafeInteger(templateId) || templateId <= 0) throw new Error("BREVO_WHATSAPP_TEMPLATE_ID deve ser um identificador numérico válido.");
-  return { senderNumber: normalizeBrazilianPhone(ENV.brevoWhatsappSender), contactNumbers: [normalizeBrazilianPhone(recipient.telefone)], templateId };
+  return { senderNumber: normalizeBrazilianPhone(config.whatsappSender), contactNumbers: [normalizeBrazilianPhone(recipient.telefone)], templateId };
 }
 
 export async function sendBrevoWhatsapp(recipient: PhoneRecipient, config: BrevoConfig = environmentBrevoConfig()) {
+  if (!config.whatsappAtivo) throw new Error("WhatsApp não está ativo para esta clínica.");
   if (!config.apiKey) throw new Error("API key do Brevo não configurada.");
   const response = await fetch("https://api.brevo.com/v3/whatsapp/sendMessage", {
     method: "POST",
@@ -109,20 +115,22 @@ export async function dispatchDueReminderEmails() {
   let skipped = 0;
 
   for (const reminder of due) {
+    if (reminder.canal === "INTERNO") { skipped += 1; continue; }
+    if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(reminder.clinicaId))) { skipped += 1; continue; }
     const claimed = await db.update(lembretes).set({ enviadoEm: new Date(), tentativas: sql`${lembretes.tentativas} + 1` })
       .where(and(eq(lembretes.id, reminder.id), eq(lembretes.status, "PENDENTE"), isNull(lembretes.enviadoEm)));
     if (!claimed[0].affectedRows) { skipped += 1; continue; }
 
     try {
-      const session = (await db.select().from(sessoes).where(eq(sessoes.id, reminder.sessaoId)).limit(1))[0];
+      const session = (await db.select().from(sessoes).where(and(eq(sessoes.id, reminder.sessaoId), eq(sessoes.clinicaId, reminder.clinicaId))).limit(1))[0];
       if (!session) throw new Error("Sessão do lembrete não encontrada.");
       const requestedChannel = reminder.canal;
       const config = await clinicBrevoConfig(reminder.clinicaId);
       const deliveryChannel = resolveReminderDeliveryChannel(requestedChannel, config);
       if (deliveryChannel !== requestedChannel) console.info(`[Lembretes] Canal ${requestedChannel} indisponível; envio ${reminder.id} redirecionado para e-mail.`);
       const recipient = reminder.destinatario === "CLIENTE"
-        ? (await db.select({ email: clientes.email, telefone: clientes.telefone, name: clientes.nome }).from(clientes).where(eq(clientes.id, session.clienteId)).limit(1))[0]
-        : (await db.select({ email: users.email, telefone: sql<string | null>`NULL`, name: users.name }).from(users).where(eq(users.id, session.profissionalId)).limit(1))[0];
+        ? (await db.select({ email: clientes.email, telefone: clientes.telefone, name: clientes.nome }).from(clientes).where(and(eq(clientes.id, session.clienteId), eq(clientes.clinicaId, reminder.clinicaId))).limit(1))[0]
+        : (await db.select({ email: users.email, telefone: sql<string | null>`NULL`, name: users.name }).from(users).where(and(eq(users.id, session.profissionalId), eq(users.clinicaId, reminder.clinicaId))).limit(1))[0];
       if (deliveryChannel === "WHATSAPP") {
         if (!recipient?.telefone) throw new Error("Destinatário sem telefone cadastrado.");
         await sendBrevoWhatsapp({ telefone: recipient.telefone, name: recipient.name ?? undefined }, config);

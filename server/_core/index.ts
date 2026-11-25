@@ -9,6 +9,9 @@ import { createContext } from "./context";
 import { ENV } from "./env";
 import { dispatchDueReminderEmails } from "../reminders";
 import { serveStatic, setupVite } from "./vite";
+import { registerCentralLinkRoute } from "../centralLinkRoute";
+import { deliverPendingRegistrations } from "../centralRegistrationOutbox";
+import { centralOrigin } from "../centralRegistrationClient";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -32,6 +35,14 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  if (process.env.NODE_ENV === "production" && process.env.PUBLIC_REGISTRATION_ENABLED === "true") {
+    const allowed = process.env.CENTRAL_ENABLED === "true" && (process.env.CENTRAL_WEBHOOK_SECRET ?? "").length >= 32 && Boolean(process.env.CENTRAL_API_TOKEN) && Boolean(process.env.BREVO_API_KEY) && Boolean(process.env.BREVO_FROM_EMAIL);
+    if (!allowed) throw new Error("Cadastro em produção requer configuração Central e Brevo completa.");
+    centralOrigin(process.env.PUBLIC_BASE_URL ?? "", { environment: "production", allowLocalHttp: false });
+    centralOrigin(process.env.CENTRAL_BASE_URL ?? "", { environment: "production", allowLocalHttp: false });
+  }
+  const testDatabase = (() => { try { const url = new URL(process.env.DATABASE_URL ?? ""); return url.protocol === "mysql:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.pathname === "/clinica_cadastro_duplo_homologacao_20261124"; } catch { return false; } })();
+  registerCentralLinkRoute(app, process.env.CENTRAL_WEBHOOK_SECRET ?? "", process.env.CENTRAL_ENABLED === "true" || (process.env.NODE_ENV !== "production" && process.env.CLINICA_CADASTRO_HOMOLOGACAO === "1" && testDatabase));
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -70,12 +81,17 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
+  server.listen(port, process.env.HOST || undefined, () => {
     console.log(`Server running on http://localhost:${port}/`);
     if (ENV.reminderIntervalMs > 0) {
       setInterval(() => { void dispatchDueReminderEmails().catch((error) => console.error("[Lembretes] Falha no scheduler interno:", error)); }, ENV.reminderIntervalMs);
     }
+    if (process.env.CENTRAL_ENABLED === "true") {
+      const dispatch = () => deliverPendingRegistrations({ baseUrl: process.env.CENTRAL_BASE_URL ?? "", apiToken: process.env.CENTRAL_API_TOKEN ?? "", environment: process.env.NODE_ENV ?? "production", allowLocalHttp: process.env.CENTRAL_ALLOW_LOCAL_HTTP === "true" }).catch(() => console.error("[Central] Falha no processamento de cadastros."));
+      void dispatch();
+      setInterval(() => void dispatch(), 60000);
+    }
   });
 }
 
-startServer().catch(console.error);
+startServer().catch(error => { console.error("Falha na inicialização:", error instanceof Error ? error.message : "erro interno"); process.exitCode = 1; });

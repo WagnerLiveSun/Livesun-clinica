@@ -23,6 +23,63 @@ export const clinicas = mysqlTable("clinicas", {
 
 export type Clinica = typeof clinicas.$inferSelect;
 
+/** Solicitações de cadastro; não representam autorização de acesso ao produto. */
+export const solicitacoesClinica = mysqlTable("solicitacoes_clinica", {
+  id: int("id").autoincrement().primaryKey(),
+  nome: varchar("nome", { length: 150 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
+  telefone: varchar("telefone", { length: 30 }).notNull(),
+  empresa: varchar("empresa", { length: 200 }).notNull(),
+  cidade: varchar("cidade", { length: 100 }).notNull(),
+  estado: varchar("estado", { length: 2 }).notNull(),
+  documento: varchar("documento", { length: 14 }).notNull(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  tokenExpiraEm: timestamp("tokenExpiraEm").notNull(),
+  emailConfirmadoEm: timestamp("emailConfirmadoEm"),
+  clinicaId: int("clinicaId"),
+  usuarioId: int("usuarioId"),
+  aceiteEm: timestamp("aceiteEm").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/** Outbox do cadastro, seguindo o modelo de solicitações do Propostas. */
+export const solicitacoesCentral = mysqlTable("solicitacoes_central", {
+  id: int("id").autoincrement().primaryKey(),
+  cadastroId: int("cadastro_id").notNull().unique(),
+  empresaId: int("empresa_id").notNull().unique(),
+  eventoId: varchar("evento_id", { length: 36 }).notNull().unique(),
+  payload: text("payload").notNull(),
+  status: varchar("status", { length: 30 }).default("PENDENTE").notNull(),
+  tentativas: int("tentativas").default(0).notNull(),
+  ultimaTentativaEm: timestamp("ultima_tentativa_em"),
+  proximaTentativaEm: timestamp("proxima_tentativa_em"),
+  leaseId: varchar("lease_id", { length: 32 }),
+  leaseAte: timestamp("lease_ate"),
+  erroCategoria: varchar("erro_categoria", { length: 40 }),
+  centralSolicitacaoId: int("central_solicitacao_id"),
+  criadaEm: timestamp("criada_em").defaultNow().notNull(),
+  recebidaEm: timestamp("recebida_em"),
+});
+
+/** Cache local do vínculo comercial conforme o contrato do Central. */
+export const centralTenants = mysqlTable("central_tenants", {
+  empresaId: int("empresa_id").primaryKey(),
+  centralClienteId: int("central_cliente_id").notNull().unique(),
+  payload: text("payload").notNull(),
+  assinaturaId: int("assinatura_id").notNull(),
+  versao: int("versao").notNull(),
+  validoAte: timestamp("valido_ate").notNull(),
+  atualizadoEm: timestamp("atualizado_em").defaultNow().notNull(),
+});
+
+export const centralEventosRecebidos = mysqlTable("central_eventos_recebidos", {
+  eventoId: varchar("evento_id", { length: 50 }).primaryKey(),
+  clienteId: int("cliente_id").notNull(),
+  assinaturaId: int("assinatura_id").notNull(),
+  versao: int("versao").notNull(),
+  recebidoEm: timestamp("recebido_em").defaultNow().notNull(),
+});
+
 /** Identidade autenticada pela plataforma e perfis internos da clínica. */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),

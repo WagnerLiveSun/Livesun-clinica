@@ -4,6 +4,7 @@ import { authenticateLocalRequest } from "../localAuth";
 import { clientes, fotosProntuario, sessoes } from "../../drizzle/schema";
 import { getDb } from "../db";
 import { storageRead } from "../storage";
+import { clinicCommercialAccess } from "../centralAccess";
 
 export function registerStorageProxy(app: Express) {
   app.get("/storage/*", async (req, res) => {
@@ -14,7 +15,15 @@ export function registerStorageProxy(app: Express) {
     }
 
     try {
-      if (key.includes("/prontuarios/")) {
+      // Só logotipos expressamente públicos e fotos de prontuário possuem
+      // política de acesso definida. Nunca servir chaves arbitrárias do disco.
+      const publicLogo = /^clinica\/[1-9]\d*\/clinic-assets\/logo_[a-f0-9]{8}\.(?:jpg|png|webp)$/.test(key);
+      const clinicalPhoto = /^clinica\/[1-9]\d*\/prontuarios\/[1-9]\d*\/[a-f0-9-]+_[a-f0-9]{8}\.(?:jpg|png|webp)$/.test(key);
+      if (!publicLogo && !clinicalPhoto) {
+        res.status(404).send("Storage object not found");
+        return;
+      }
+      if (clinicalPhoto) {
         const user = await authenticateLocalRequest(req);
         if (!user) {
           res.status(401).send("Authentication required");
@@ -24,6 +33,10 @@ export function registerStorageProxy(app: Express) {
         const photo = db ? (await db.select({ clinicaId: fotosProntuario.clinicaId, clienteId: fotosProntuario.clienteId }).from(fotosProntuario).where(eq(fotosProntuario.storageKey, key)).limit(1))[0] : undefined;
         if (!photo || photo.clinicaId !== user.clinicaId) {
           res.status(404).send("Storage object not found");
+          return;
+        }
+        if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(photo.clinicaId))) {
+          res.status(403).send("Storage access denied");
           return;
         }
         if (user.role !== "admin" && user.role !== "recepcao") {

@@ -17,7 +17,20 @@ function nextCalendarDate() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-describe("integração pública operacional do autoagendamento", () => {
+// Este teste altera uma regra, mesmo que tente restaurá-la no finally. Nunca
+// deve rodar contra um banco configurado por .env ou por acidente em produção.
+function disposableDatabaseEnabled() {
+  if (process.env.RUN_DISPOSABLE_DB_TESTS !== "1" || !process.env.DATABASE_URL) return false;
+  try {
+    const url = new URL(process.env.DATABASE_URL);
+    return url.protocol === "mysql:" && ["localhost", "127.0.0.1"].includes(url.hostname)
+      && url.pathname === "/clinica_homologacao_descartavel";
+  } catch {
+    return false;
+  }
+}
+
+describe.skipIf(!disposableDatabaseEnabled())("integração pública operacional do autoagendamento", () => {
   it("retorna um profissional vinculado a serviço e consulta horários reais sem alterar dados", async () => {
     const caller = appRouter.createCaller(publicContext);
     const db = await getDb();

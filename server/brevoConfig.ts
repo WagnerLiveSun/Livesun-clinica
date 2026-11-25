@@ -58,14 +58,13 @@ export function environmentBrevoConfig(): BrevoConfig {
 }
 
 export async function clinicBrevoConfig(clinicaId: number): Promise<BrevoConfig> {
-  const fallback = environmentBrevoConfig();
   const db = await getDb();
-  if (!db) return fallback;
+  if (!db) throw new Error("Banco de dados indisponível para configurar comunicação da clínica.");
   const row = (await db.select().from(clinicMessagingSettings).where(eq(clinicMessagingSettings.clinicaId, clinicaId)).limit(1))[0];
-  if (!row) return fallback;
+  if (!row) return { apiKey: "", fromEmail: "", smsSender: "", whatsappSender: "", whatsappTemplateId: "", emailAtivo: false, smsAtivo: false, whatsappAtivo: false };
   return {
-    apiKey: row.brevoApiKeyEncrypted ? decryptSecret(row.brevoApiKeyEncrypted) ?? "" : fallback.apiKey,
-    fromEmail: row.brevoFromEmail ?? fallback.fromEmail,
+    apiKey: row.brevoApiKeyEncrypted ? decryptSecret(row.brevoApiKeyEncrypted) ?? "" : "",
+    fromEmail: row.brevoFromEmail ?? "",
     fromName: row.brevoFromName ?? undefined,
     replyTo: row.brevoReplyTo ?? undefined,
     smsSender: row.brevoSmsSender ?? "",

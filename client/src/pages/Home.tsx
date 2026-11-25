@@ -168,9 +168,6 @@ export default function Home() {
   const [showQuestionnaireForm, setShowQuestionnaireForm] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showReceiptForm, setShowReceiptForm] = useState(false);
-  const [showDataCleanupDialog, setShowDataCleanupDialog] = useState(false);
-  const [cleanupPassword, setCleanupPassword] = useState("");
-  const [cleanupConfirmPhrase, setCleanupConfirmPhrase] = useState("");
   const [showThemePalette, setShowThemePalette] = useState(false);
   const [selectedAgendaSession, setSelectedAgendaSession] = useState<any | null>(null);
   const [showSettlementForm, setShowSettlementForm] = useState(false);
@@ -297,24 +294,9 @@ export default function Home() {
     },
     onError: (error) => toast.error(error.message),
   });
-  const clearOperationalData = trpc.administracaoDados.limparOperacao.useMutation({
-    onSuccess: async () => {
-      setShowDataCleanupDialog(false);
-      setCleanupPassword("");
-      setCleanupConfirmPhrase("");
-      await Promise.all([
-        utils.clientes.list.invalidate(), utils.clientes.get.invalidate(), utils.sessoes.list.invalidate(),
-        utils.financeiro.contas.invalidate(), utils.financeiro.despesas.invalidate(), utils.financeiro.caixa.invalidate(),
-        utils.financeiro.dashboardStats.invalidate(), utils.financeiro.comissoes.invalidate(), utils.financeiro.relatorio.invalidate(),
-        utils.questionarios.list.invalidate(), utils.lembretes.list.invalidate(), utils.portal.resumo.invalidate(),
-      ]);
-      toast.success("Os dados operacionais desta clínica foram limpos. Cadastros-base e configurações foram preservados.");
-    },
-    onError: (error) => toast.error(error.message),
-  });
   const clinicName = settingsQuery.data?.nome ?? "SunSet";
-  const clinicSlug = settingsQuery.data?.slug ?? "clinica-principal";
-  const bookingUrl = `${window.location.origin}/agendar?clinica=${clinicSlug}`;
+  const clinicSlug = settingsQuery.data?.slug ?? null;
+  const bookingUrl = clinicSlug ? `${window.location.origin}/agendar?clinica=${encodeURIComponent(clinicSlug)}` : null;
   const clinicSlogan = settingsQuery.data?.slogan ?? "Seu cuidado, seu momento";
   const clinicLogo = settingsQuery.data?.logoUrl;
   const savedPrimaryColor = normalizeClinicColor(settingsQuery.data?.corPrimaria);
@@ -652,8 +634,9 @@ export default function Home() {
                 <div className="booking-link-display">
                   <Label>Link atual de agendamento</Label>
                   <div className="link-display">
-                    <code>{bookingUrl}</code>
-                    <Button size="sm" variant="outline" onClick={() => {
+                    <code>{bookingUrl ?? "Link indisponível: verifique a clínica ativa."}</code>
+                    <Button size="sm" variant="outline" disabled={!bookingUrl} onClick={() => {
+                      if (!bookingUrl) return;
                       navigator.clipboard.writeText(bookingUrl);
                       toast.success("Link copiado para a área de transferência!");
                     }}>Copiar</Button>
@@ -672,7 +655,8 @@ export default function Home() {
                   }}>
                     <Sparkles /> Configurar Link Personalizado
                   </Button>
-                  <Button variant="outline" onClick={() => {
+                  <Button variant="outline" disabled={!bookingUrl} onClick={() => {
+                    if (!bookingUrl) return;
                     window.open(bookingUrl, "_blank");
                   }}>
                     <Activity /> Testar Link de Agendamento
@@ -774,10 +758,6 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          {isAdmin && <Card className="surface-card mt-5 border-red-200/80 bg-red-50/70">
-            <CardHeader><div><p className="eyebrow text-red-700">ZONA DE SEGURANÇA</p><CardTitle>Limpeza de dados operacionais</CardTitle><CardDescription>Use somente ao reiniciar a operação desta clínica. Esta ação não afeta nenhuma outra clínica da plataforma.</CardDescription></div></CardHeader>
-            <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><p className="max-w-3xl text-sm text-muted-foreground">Serão removidos clientes, prontuários, agenda, fotos, respostas de anamnese, contas financeiras, recebimentos, despesas, comissões, caixa, lembretes e registros de auditoria. Usuários, serviços, profissionais, salas, equipamentos, insumos e personalização da clínica permanecem preservados.</p><Button type="button" variant="outline" className="safety-action shrink-0" onClick={() => setShowDataCleanupDialog(true)}>Limpar Dados Operacionais</Button></CardContent>
-          </Card>}
           <div className="metric-grid mt-5"><Metric icon={Users} label="Usuários cadastrados" value={String(usersQuery.data?.length ?? 0)} /><Metric icon={CalendarDays} label="Lembretes pendentes" value={String(reminderQuery.data?.filter((item) => item.status === "PENDENTE").length ?? 0)} /><Metric icon={CircleDollarSign} label="Faturamento no mês" value={currency(statsQuery.data?.faturamentoMes)} /><Metric icon={Activity} label="Ocupação de hoje" value={`${statsQuery.data?.taxaOcupacao ?? 0}%`} /></div>
           <div className="dashboard-grid finance-grid mt-5"><Card className="surface-card large-card"><CardHeader><CardTitle>Permissões de acesso</CardTitle><CardDescription>Defina o perfil operacional de cada conta autenticada.</CardDescription></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Usuário</TableHead><TableHead>E-mail</TableHead><TableHead>Perfil</TableHead><TableHead>Ativo</TableHead></TableRow></TableHeader><TableBody>{usersQuery.data?.map((account) => <TableRow key={account.id}><TableCell className="font-medium">{account.name ?? "Sem nome"}</TableCell><TableCell>{account.email ?? "—"}</TableCell><TableCell><Select value={account.role} onValueChange={(value) => updateUserRole.mutate({ id: account.id, role: value as "user" | "admin" | "recepcao" | "profissional" | "cliente", ativo: account.ativo })}><SelectTrigger className="h-8 min-w-35"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Gestor(a)</SelectItem><SelectItem value="recepcao">Recepção</SelectItem><SelectItem value="profissional">Profissional</SelectItem><SelectItem value="cliente">Cliente</SelectItem><SelectItem value="user">Cliente (padrão)</SelectItem></SelectContent></Select></TableCell><TableCell><Button size="sm" variant={account.ativo ? "outline" : "ghost"} onClick={() => updateUserRole.mutate({ id: account.id, role: account.role, ativo: !account.ativo })}>{account.ativo ? "Ativo" : "Inativo"}</Button></TableCell></TableRow>)}{!usersQuery.data?.length && <EmptyRow cols={4} message="Nenhuma conta disponível." />}</TableBody></Table></CardContent></Card><Card className="surface-card"><CardHeader><CardTitle>Fila de lembretes</CardTitle><CardDescription>Mensagens preparadas para o canal configurado.</CardDescription></CardHeader><CardContent className="space-y-2">{reminderQuery.data?.slice(0, 6).map((reminder) => <div className="expense-line" key={reminder.id}><div><strong>{reminder.destinatario}</strong><span>{dateTime(reminder.agendadoPara)}</span></div><StatusBadge value={reminder.status === "ENVIADO" ? "CONFIRMADA" : reminder.status === "CANCELADO" ? "CANCELADA" : "PENDENTE"} /></div>)}{!reminderQuery.data?.length && <p className="empty-copy">Não há lembretes enfileirados.</p>}</CardContent></Card></div>
           <Card className="surface-card mt-5"><CardHeader><div><p className="eyebrow">ESTOQUE CLÍNICO</p><CardTitle>Insumos e alertas de reposição</CardTitle><CardDescription>Controle a disponibilidade dos itens utilizados nos procedimentos.</CardDescription></div></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Insumo</TableHead><TableHead>Estoque atual</TableHead><TableHead>Mínimo</TableHead><TableHead>Custo unitário</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader><TableBody>{suppliesQuery.data?.map((supply) => <TableRow key={supply.id}><TableCell className="font-medium">{supply.nome}<small className="block">Unidade: {supply.unidade}</small></TableCell><TableCell>{Number(supply.estoqueAtual).toLocaleString("pt-BR")}</TableCell><TableCell>{Number(supply.estoqueMinimo).toLocaleString("pt-BR")}</TableCell><TableCell>{currency(supply.custoUnitario)}</TableCell><TableCell><span className={`status-badge ${supply.abaixoDoMinimo ? "status-danger" : "status-success"}`}>{supply.abaixoDoMinimo ? "Repor" : "Adequado"}</span></TableCell><TableCell className="text-right"><Button size="sm" variant="outline" onClick={() => { setSupplyForm({ id: supply.id, nome: supply.nome, unidade: supply.unidade, estoqueAtual: String(supply.estoqueAtual), estoqueMinimo: String(supply.estoqueMinimo), custoUnitario: String(supply.custoUnitario) }); setShowSupplyForm(true); }}>Editar</Button></TableCell></TableRow>)}{!suppliesQuery.data?.length && <EmptyRow cols={6} message="Nenhum insumo cadastrado." />}</TableBody></Table></CardContent></Card>
@@ -785,9 +765,6 @@ export default function Home() {
       </main>
     </div>
 
-    <Dialog open={showDataCleanupDialog} onOpenChange={(open) => { setShowDataCleanupDialog(open); if (!open) { setCleanupPassword(""); setCleanupConfirmPhrase(""); } }}>
-      <DialogContent><DialogHeader><DialogTitle>Confirmar limpeza operacional</DialogTitle><DialogDescription>Esta ação será aplicada apenas à clínica <strong>{clinicName}</strong> e não poderá ser desfeita. Revise as informações antes de confirmar.</DialogDescription></DialogHeader><div className="form-stack"><div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-950"><strong>Dados removidos:</strong> clientes, prontuários, agenda, fotos, anamneses, financeiro, caixa, comissões, lembretes e auditoria.<br /><strong>Dados preservados:</strong> usuários, configuração e identidade da clínica, serviços, profissionais, salas, equipamentos e insumos.</div><Field label="Sua senha de gestor"><Input type="password" value={cleanupPassword} onChange={(event) => setCleanupPassword(event.target.value)} autoComplete="current-password" placeholder="Informe sua senha" /></Field><Field label='Digite “LIMPAR DADOS” para confirmar'><Input value={cleanupConfirmPhrase} onChange={(event) => setCleanupConfirmPhrase(event.target.value)} autoComplete="off" placeholder="LIMPAR DADOS" /></Field></div><DialogFooter><Button variant="outline" onClick={() => setShowDataCleanupDialog(false)}>Cancelar</Button><Button type="button" className="bg-red-600 text-white hover:bg-red-700" disabled={cleanupPassword.length === 0 || cleanupConfirmPhrase !== "LIMPAR DADOS" || clearOperationalData.isPending} onClick={() => clearOperationalData.mutate({ senha: cleanupPassword, confirmacao: "LIMPAR DADOS" })}>{clearOperationalData.isPending ? "Limpando dados..." : "Confirmar limpeza"}</Button></DialogFooter></DialogContent>
-    </Dialog>
     
     <Dialog open={showFirstAccessSetup} onOpenChange={(open) => { setShowFirstAccessSetup(open); if (!open) setFirstAccessForm({ clinicaNome: "", clinicaSlug: "", adminNome: "", adminEmail: "", adminSenha: "" }); }}>
       <DialogContent className="max-w-2xl">

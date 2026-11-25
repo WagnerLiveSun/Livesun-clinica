@@ -160,4 +160,55 @@ describe("isolamento entre clínicas", () => {
     expect(conditions[0].sql).toContain("`users`.`role`");
     expect(conditions[0].params).toEqual(expect.arrayContaining([31, 7, "profissional"]));
   });
+
+  it("não vincula recebimento da clínica A a paciente da clínica B", async () => {
+    const insert = vi.fn();
+    const database = {
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ id: 4, clinicaId: 7, clienteId: 100, valorFinal: "150.00" }] }) }) }),
+      insert,
+    };
+    getDbMock.mockResolvedValue(database);
+    await expect(appRouter.createCaller(adminContext(7)).financeiro.receber({ contaReceberId: 4, clienteId: 200, valor: "50.00", tipoPagamento: "PIX" })).rejects.toThrow("O cliente informado não pertence a esta conta");
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("não gera recibo com conta pertencente a outra clínica", async () => {
+    const dialect = new MySqlDialect();
+    const conditions: Array<{ sql: string; params: unknown[] }> = [];
+    const results = [[{ id: 11, contaReceberId: 44, clienteId: 91, estornadoEm: null }], []];
+    const database = { select: () => ({ from: () => ({ where: (condition: unknown) => {
+      conditions.push(dialect.sqlToQuery(condition as any));
+      return { limit: async () => results.shift() ?? [] };
+    } }) }) };
+    getDbMock.mockResolvedValue(database);
+    await expect(appRouter.createCaller(adminContext(7)).financeiro.gerarRecibo({ recebimentoId: 11 })).rejects.toThrow("Conta a receber não encontrada");
+    expect(conditions[1].params).toEqual(expect.arrayContaining([44, 7]));
+  });
+
+  it("rejeita foto para paciente de outra clínica antes de gravar arquivo", async () => {
+    const dialect = new MySqlDialect();
+    const conditions: Array<{ sql: string; params: unknown[] }> = [];
+    const insert = vi.fn();
+    getDbMock.mockResolvedValue({ select: () => ({ from: () => ({ where: (condition: unknown) => {
+      conditions.push(dialect.sqlToQuery(condition as any));
+      return { limit: async () => [] };
+    } }) }), insert });
+    await expect(appRouter.createCaller(adminContext(7)).prontuario.uploadPhoto({ clienteId: 200, categoria: "ANTES", dataUrl: "data:image/png;base64,AAAAAA==" })).rejects.toThrow("Cliente não encontrado");
+    expect(conditions[0].params).toEqual(expect.arrayContaining([200, 7]));
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("rejeita foto vinculada a sessão de outra clínica", async () => {
+    const dialect = new MySqlDialect();
+    const conditions: Array<{ sql: string; params: unknown[] }> = [];
+    const results = [[{ id: 100 }], []];
+    const insert = vi.fn();
+    getDbMock.mockResolvedValue({ select: () => ({ from: () => ({ where: (condition: unknown) => {
+      conditions.push(dialect.sqlToQuery(condition as any));
+      return { limit: async () => results.shift() ?? [] };
+    } }) }), insert });
+    await expect(appRouter.createCaller(adminContext(7)).prontuario.uploadPhoto({ clienteId: 100, sessaoId: 400, categoria: "ANTES", dataUrl: "data:image/png;base64,AAAAAA==" })).rejects.toThrow("sessão não pertence");
+    expect(conditions[1].params).toEqual(expect.arrayContaining([400, 7, 100]));
+    expect(insert).not.toHaveBeenCalled();
+  });
 });

@@ -88,7 +88,7 @@ describe("fluxos completos de autenticação local", () => {
 
     await expect(caller.auth.login({ email: "bloqueado@sunset.test", password: "Senha forte 123" })).rejects.toThrow("E-mail ou senha inválidos");
     await expect(caller.auth.logout()).resolves.toEqual({ success: true });
-    expect(context.clearCookie).toHaveBeenCalledOnce();
+    expect(context.clearCookie).toHaveBeenCalledTimes(2);
     expect(context.clearCookie.mock.calls[0][0]).toBe(COOKIE_NAME);
   });
 
@@ -102,14 +102,30 @@ describe("fluxos completos de autenticação local", () => {
     expect(setupDb.insert).toHaveBeenCalledOnce();
     expect(mocks.sendBrevoReminder).toHaveBeenCalledOnce();
 
-    const resetDb = createDb({ id: 8, userId: 20 });
-    mocks.getDb.mockResolvedValueOnce(resetDb).mockResolvedValueOnce(createDb());
+    const resetDb = createDb({ id: 8, userId: 20, clinicaId: 7 });
+    resetDb.selectLimit.mockReturnValueOnce({ for: async () => [{ id: 8, userId: 20, clinicaId: 7 }] } as any);
+    resetDb.updateWhere.mockResolvedValue([{ affectedRows: 1 }] as any);
+    (resetDb as any).transaction = async (callback: (tx: unknown) => Promise<void>) => callback(resetDb);
+    const expiredDb = createDb();
+    expiredDb.selectLimit.mockReturnValueOnce({ for: async () => [] } as any);
+    (expiredDb as any).transaction = async (callback: (tx: unknown) => Promise<void>) => callback(expiredDb);
+    mocks.getDb.mockResolvedValueOnce(resetDb).mockResolvedValueOnce(expiredDb);
     const caller = appRouter.createCaller(createContext() as any);
     const token = "t".repeat(40);
     await expect(caller.auth.resetPassword({ token, password: "Nova senha 123" })).resolves.toEqual({ success: true });
     expect(resetDb.update).toHaveBeenCalledTimes(2);
 
     await expect(caller.auth.resetPassword({ token, password: "Nova senha 123" })).rejects.toThrow("inválido ou expirou");
+  });
+
+  it("não consome token se a conta não estiver ativa", async () => {
+    const resetDb = createDb({ id: 8, userId: 20, clinicaId: 7 });
+    resetDb.selectLimit.mockReturnValueOnce({ for: async () => [{ id: 8, userId: 20, clinicaId: 7 }] } as any);
+    resetDb.updateWhere.mockResolvedValue([{ affectedRows: 0 }] as any);
+    (resetDb as any).transaction = async (callback: (tx: unknown) => Promise<void>) => callback(resetDb);
+    mocks.getDb.mockResolvedValue(resetDb);
+    await expect(appRouter.createCaller(createContext() as any).auth.resetPassword({ token: "t".repeat(40), password: "Nova senha 123" })).rejects.toThrow("inválido ou expirou");
+    expect(resetDb.update).toHaveBeenCalledTimes(1);
   });
 
   it("envia o bootstrap somente para gestor sem senha quando não existem credenciais locais ativas", async () => {

@@ -7,11 +7,13 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Booking from "./pages/Booking";
 import Home from "./pages/Home";
+import LandingClinicas from "./pages/LandingClinicas";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
+      <Route path={"/lp/clinicas"} component={LandingClinicas} />
       <Route path={"/agendar"} component={Booking} />
       <Route path={"/"} component={Home} />
       <Route path={"/404"} component={NotFound} />

@@ -3,6 +3,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { getActiveClinicId } from "./cookies";
+import { clinicCommercialAccess } from "../centralAccess";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -30,11 +31,14 @@ const requireUser = t.middleware(async opts => {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
 
+  const clinicId = resolveClinicaId(ctx, ctx.user);
+  if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(clinicId))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
+
   return next({
     ctx: {
       ...ctx,
       user: ctx.user,
-      clinicaId: resolveClinicaId(ctx, ctx.user),
+      clinicaId: clinicId,
       isMaster: ctx.user.role === "master",
     },
   });
@@ -49,6 +53,7 @@ export const adminProcedure = t.procedure.use(
     if (!ctx.user || (ctx.user.role !== 'admin' && ctx.user.role !== 'master')) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
+    if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(resolveClinicaId(ctx, ctx.user)))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
     
     const isMaster = ctx.user.role === 'master';
     if (!isMaster && !ctx.user.clinicaId) {

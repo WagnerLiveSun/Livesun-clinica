@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import bcrypt from "bcryptjs";
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -47,6 +47,8 @@ import { resolveReminderDeliveryChannel, sendBrevoReminder } from "./reminders";
 import { storagePut } from "./storage";
 import { clinicBrevoConfig, decryptSecret, encryptSecret, maskSecret } from "./brevoConfig";
 import { generateReceiptHTML, generateReceiptNumber } from "./receiptGenerator";
+import { cadastroClinicaRouter } from "./cadastroClinica";
+import { clinicCommercialAccess } from "./centralAccess";
 
 const roles = z.enum(["master", "user", "admin", "recepcao", "profissional", "cliente"]);
 const sessionStatus = z.enum([
@@ -142,7 +144,7 @@ export function formatAppointmentDateTime(value: Date, clientTimeZone?: string) 
 }
 
 export function publicBookingConfirmationMessage(serviceName: string, appointmentStart: Date, clientTimeZone?: string) {
-  return `Recebemos sua solicitação de ${serviceName} para ${formatAppointmentDateTime(appointmentStart, clientTimeZone)}. A equipe SunSet confirmará o horário em breve.`;
+  return `Recebemos sua solicitação de ${serviceName} para ${formatAppointmentDateTime(appointmentStart, clientTimeZone)}. A equipe da clínica confirmará o horário em breve.`;
 }
 
 export function publicBookingReminderMessage(appointmentStart: Date, clientTimeZone?: string) {
@@ -195,7 +197,7 @@ function publicAnswerHasValue(answer: { respostaTexto?: string; respostaBoolean?
   return Boolean(answer.respostaTexto?.trim() || answer.respostaBoolean !== undefined || answer.respostaNumero || answer.respostaData || answer.respostaJson);
 }
 
-async function resolvePublicBookingSession(token: string) {
+async function resolvePublicBookingSession(token: string, clinicaSlug: string) {
   const db = requireDatabase(await getDb());
   const bookingSession = (await db.select().from(publicBookingTokens)
     .where(and(
@@ -204,7 +206,10 @@ async function resolvePublicBookingSession(token: string) {
       isNull(publicBookingTokens.usedAt),
     )).limit(1))[0];
   if (!bookingSession) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sua sessão de agendamento expirou. Refaça o cadastro para continuar." });
-  const client = (await db.select().from(clientes).where(eq(clientes.id, bookingSession.clienteId)).limit(1))[0];
+  const clinic = (await db.select({ id: clinicas.id }).from(clinicas).where(and(eq(clinicas.id, bookingSession.clinicaId), eq(clinicas.slug, clinicaSlug), eq(clinicas.ativa, true))).limit(1))[0];
+  if (!clinic) throw new TRPCError({ code: "FORBIDDEN", message: "A sessão não pertence a esta clínica ou o link não está mais disponível." });
+  if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(clinic.id))) throw new TRPCError({ code: "FORBIDDEN", message: "Agendamento indisponível para esta clínica." });
+  const client = (await db.select().from(clientes).where(and(eq(clientes.id, bookingSession.clienteId), eq(clientes.clinicaId, bookingSession.clinicaId))).limit(1))[0];
   if (!client || client.clinicaId !== bookingSession.clinicaId || client.status !== "ATIVO") throw new TRPCError({ code: "FORBIDDEN", message: "Este cadastro não está disponível para agendamento." });
   return { db, bookingSession, client };
 }
@@ -213,6 +218,7 @@ async function resolvePublicClinic(clinicaSlug: string) {
   const db = requireDatabase(await getDb());
   const clinic = (await db.select().from(clinicas).where(and(eq(clinicas.slug, clinicaSlug), eq(clinicas.ativa, true))).limit(1))[0];
   if (!clinic) throw new TRPCError({ code: "NOT_FOUND", message: "Clínica não encontrada ou indisponível para agendamento on-line." });
+  if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(clinic.id))) throw new TRPCError({ code: "FORBIDDEN", message: "Agendamento indisponível para esta clínica." });
   return { db, clinic };
 }
 
@@ -292,14 +298,21 @@ export function canBootstrapFirstManager(activeLocalCredentials: Array<{ id: num
 }
 
 export const appRouter = router({
+  cadastroClinica: cadastroClinicaRouter,
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(({ ctx }) => ctx.user),
+    me: publicProcedure.query(({ ctx }) => ctx.user ? {
+      id: ctx.user.id,
+      name: ctx.user.name,
+      email: ctx.user.email,
+      role: ctx.user.role,
+    } : null),
     login: publicProcedure.input(z.object({ email: emailInput, password: z.string().min(1) })).mutation(async ({ input, ctx }) => {
       const user = await getUserByEmail(input.email);
       if (!user?.ativo || !user.passwordHash || !(await bcrypt.compare(input.password, user.passwordHash))) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "E-mail ou senha inválidos." });
       }
+      if (process.env.CENTRAL_ENABLED === "true" && !(await clinicCommercialAccess(user.clinicaId ?? 0))) throw new TRPCError({ code: "FORBIDDEN", message: "A assinatura desta clínica não está ativa ou não pôde ser verificada." });
       const db = requireDatabase(await getDb());
       await db.update(users).set({ lastSignedIn: new Date(), loginMethod: "local" }).where(eq(users.id, user.id));
       const token = await createLocalSessionToken(user.id);
@@ -334,14 +347,19 @@ export const appRouter = router({
     }),
     resetPassword: publicProcedure.input(z.object({ token: z.string().min(32), password: localPassword })).mutation(async ({ input }) => {
       const db = requireDatabase(await getDb());
-      const record = (await db.select().from(passwordResetTokens).where(and(eq(passwordResetTokens.tokenHash, resetTokenHash(input.token)), isNull(passwordResetTokens.usedAt), gte(passwordResetTokens.expiresAt, new Date()))).limit(1))[0];
-      if (!record) throw new TRPCError({ code: "BAD_REQUEST", message: "Este link de redefinição é inválido ou expirou." });
       const hash = await bcrypt.hash(input.password, 12);
-      await db.update(users).set({ passwordHash: hash, passwordUpdatedAt: new Date(), loginMethod: "local" }).where(and(eq(users.id, record.userId), eq(users.clinicaId, record.clinicaId)));
-      await db.update(passwordResetTokens).set({ usedAt: new Date() }).where(and(eq(passwordResetTokens.id, record.id), eq(passwordResetTokens.clinicaId, record.clinicaId)));
+      await db.transaction(async (tx) => {
+        const now = new Date();
+        const record = (await tx.select().from(passwordResetTokens).where(and(eq(passwordResetTokens.tokenHash, resetTokenHash(input.token)), isNull(passwordResetTokens.usedAt), gte(passwordResetTokens.expiresAt, now))).limit(1).for("update"))[0];
+        if (!record) throw new TRPCError({ code: "BAD_REQUEST", message: "Este link de redefinição é inválido ou expirou." });
+        const updated = await tx.update(users).set({ passwordHash: hash, passwordUpdatedAt: now, loginMethod: "local" }).where(and(eq(users.id, record.userId), eq(users.clinicaId, record.clinicaId), eq(users.ativo, true)));
+        if (updated[0].affectedRows !== 1) throw new TRPCError({ code: "BAD_REQUEST", message: "Este link de redefinição é inválido ou expirou." });
+        await tx.update(passwordResetTokens).set({ usedAt: now }).where(and(eq(passwordResetTokens.userId, record.userId), eq(passwordResetTokens.clinicaId, record.clinicaId), isNull(passwordResetTokens.usedAt)));
+      });
       return { success: true } as const;
     }),
     createLocalUser: adminOnlyProcedure.input(z.object({ name: z.string().trim().min(2).max(120), email: emailInput, password: localPassword, role: roles, telefone: z.string().trim().max(32).optional() })).mutation(async ({ input, ctx }) => {
+      if (input.role === "master") throw new TRPCError({ code: "FORBIDDEN", message: "O perfil master não pode ser atribuído pela clínica." });
       const db = requireDatabase(await getDb());
       if (await getUserByEmail(input.email)) throw new TRPCError({ code: "CONFLICT", message: "Já existe um usuário com este e-mail." });
       const passwordHash = await bcrypt.hash(input.password, 12);
@@ -360,8 +378,9 @@ export const appRouter = router({
     }),
     updateRole: adminOnlyProcedure.input(z.object({ id: z.number().int().positive(), role: roles, ativo: z.boolean().optional() }))
       .mutation(async ({ input, ctx }) => {
+        if (input.role === "master") throw new TRPCError({ code: "FORBIDDEN", message: "O perfil master não pode ser atribuído pela clínica." });
         const db = requireDatabase(await getDb());
-        await db.update(users).set({ role: input.role, ...(input.ativo === undefined ? {} : { ativo: input.ativo }) }).where(and(eq(users.id, input.id), eq(users.clinicaId, ctx.clinicaId)));
+        await db.update(users).set({ role: input.role, ...(input.ativo === undefined ? {} : { ativo: input.ativo }) }).where(and(eq(users.id, input.id), eq(users.clinicaId, ctx.clinicaId), ne(users.role, "master")));
         await audit(ctx.user.id, "usuario", "PERFIL_ATUALIZADO", input.id, undefined, input);
         return { success: true };
       }),
@@ -460,7 +479,14 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         if (!(await canAccessClient(ctx.user, input.clienteId))) throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito a este prontuário." });
         const db = requireDatabase(await getDb());
-        await db.insert(prontuarios).values({ clinicaId: ctx.clinicaId, ...input, atualizadoPor: ctx.user.id }).onDuplicateKeyUpdate({ set: { alergias: input.alergias ?? null, restricoes: input.restricoes ?? null, observacoesClinicas: input.observacoesClinicas ?? null, atualizadoPor: ctx.user.id } });
+        const client = (await db.select({ id: clientes.id }).from(clientes).where(and(eq(clientes.id, input.clienteId), eq(clientes.clinicaId, ctx.clinicaId))).limit(1))[0];
+        if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
+        const record = (await db.select({ id: prontuarios.id }).from(prontuarios).where(and(eq(prontuarios.clienteId, input.clienteId), eq(prontuarios.clinicaId, ctx.clinicaId))).limit(1))[0];
+        if (record) {
+          await db.update(prontuarios).set({ alergias: input.alergias ?? null, restricoes: input.restricoes ?? null, observacoesClinicas: input.observacoesClinicas ?? null, atualizadoPor: ctx.user.id }).where(and(eq(prontuarios.id, record.id), eq(prontuarios.clinicaId, ctx.clinicaId), eq(prontuarios.clienteId, input.clienteId)));
+        } else {
+          await db.insert(prontuarios).values({ clinicaId: ctx.clinicaId, ...input, atualizadoPor: ctx.user.id });
+        }
         await audit(ctx.user.id, "prontuario", "ATUALIZADO", undefined, input.clienteId);
         return { success: true };
       }),
@@ -478,6 +504,12 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         if (!(await canAccessClient(ctx.user, input.clienteId))) throw new TRPCError({ code: "FORBIDDEN", message: "Acesso restrito a este prontuário." });
         const db = requireDatabase(await getDb());
+        const client = (await db.select({ id: clientes.id }).from(clientes).where(and(eq(clientes.id, input.clienteId), eq(clientes.clinicaId, ctx.clinicaId))).limit(1))[0];
+        if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
+        if (input.sessaoId) {
+          const session = (await db.select({ id: sessoes.id }).from(sessoes).where(and(eq(sessoes.id, input.sessaoId), eq(sessoes.clinicaId, ctx.clinicaId), eq(sessoes.clienteId, input.clienteId))).limit(1))[0];
+          if (!session) throw new TRPCError({ code: "BAD_REQUEST", message: "A sessão não pertence a este cliente e clínica." });
+        }
         const image = decodeImage(input.dataUrl);
         const uploaded = await storagePut(`clinica/${ctx.clinicaId}/prontuarios/${input.clienteId}/${crypto.randomUUID()}.${image.extension}`, image.buffer, image.contentType);
         const [result] = await db.insert(fotosProntuario).values({ clinicaId: ctx.clinicaId, clienteId: input.clienteId, sessaoId: input.sessaoId ?? null, categoria: input.categoria, legenda: input.legenda || null, storageKey: uploaded.key, enviadoPor: ctx.user.id });
@@ -700,6 +732,10 @@ export const appRouter = router({
     }))
       .mutation(async ({ input, ctx }) => {
         const db = requireDatabase(await getDb());
+        if (input.servicoId) {
+          const service = (await db.select({ id: servicos.id }).from(servicos).where(and(eq(servicos.id, input.servicoId), eq(servicos.clinicaId, ctx.clinicaId))).limit(1))[0];
+          if (!service) throw new TRPCError({ code: "NOT_FOUND", message: "Serviço não encontrado nesta clínica." });
+        }
         const versions = await db.select({ versao: questionarios.versao }).from(questionarios).where(and(eq(questionarios.clinicaId, ctx.clinicaId), eq(questionarios.codigo, input.codigo)));
         const version = Math.max(0, ...versions.map((item) => item.versao)) + 1;
         if (versions.length) await db.update(questionarios).set({ ativo: false }).where(and(eq(questionarios.clinicaId, ctx.clinicaId), eq(questionarios.codigo, input.codigo)));
@@ -728,12 +764,25 @@ export const appRouter = router({
           if (normalizar(input.assinaturaDigital) !== normalizar(ctx.user.name)) throw new TRPCError({ code: "BAD_REQUEST", message: "A assinatura deve corresponder ao nome da sua conta." });
         }
         const db = requireDatabase(await getDb());
+        const client = (await db.select({ id: clientes.id }).from(clientes).where(and(eq(clientes.id, input.clienteId), eq(clientes.clinicaId, ctx.clinicaId))).limit(1))[0];
+        if (!client) throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado nesta clínica." });
+        if (input.sessaoId) {
+          const session = (await db.select({ id: sessoes.id }).from(sessoes).where(and(eq(sessoes.id, input.sessaoId), eq(sessoes.clinicaId, ctx.clinicaId), eq(sessoes.clienteId, input.clienteId))).limit(1))[0];
+          if (!session) throw new TRPCError({ code: "BAD_REQUEST", message: "A sessão não pertence ao cliente desta clínica." });
+        }
         const questionnaire = (await db.select().from(questionarios).where(and(eq(questionarios.id, input.questionarioId), eq(questionarios.clinicaId, ctx.clinicaId))).limit(1))[0];
         if (!questionnaire) throw new TRPCError({ code: "NOT_FOUND", message: "Questionário não encontrado." });
-        const [response] = await db.insert(respostasQuestionario).values({ clinicaId: ctx.clinicaId, clienteId: input.clienteId, sessaoId: input.sessaoId ?? null, questionarioId: input.questionarioId, versaoQuestionario: questionnaire.versao, declaracaoVeracidade: true, assinaturaDigital: input.assinaturaDigital, respondidoPor: ctx.user.id, respostasJson: JSON.stringify(input.respostas) });
-        await db.insert(respostas).values(input.respostas.map((answer) => ({ clinicaId: ctx.clinicaId, respostaQuestionarioId: response.insertId, perguntaId: answer.perguntaId, respostaTexto: answer.respostaTexto ?? null, respostaBoolean: answer.respostaBoolean ?? null, respostaNumero: answer.respostaNumero ? toCurrency(answer.respostaNumero) : null, respostaData: answer.respostaData ?? null, respostaJson: answer.respostaJson ?? null })));
-        await audit(ctx.user.id, "questionario", "RESPONDIDO", response.insertId, input.clienteId);
-        return { success: true, id: response.insertId };
+        const links = await db.select({ perguntaId: questionarioPerguntas.perguntaId }).from(questionarioPerguntas).where(and(eq(questionarioPerguntas.clinicaId, ctx.clinicaId), eq(questionarioPerguntas.questionarioId, input.questionarioId)));
+        const allowedIds = new Set(links.map(link => link.perguntaId));
+        const providedIds = input.respostas.map(answer => answer.perguntaId);
+        if (new Set(providedIds).size !== providedIds.length || providedIds.some(id => !allowedIds.has(id))) throw new TRPCError({ code: "BAD_REQUEST", message: "As perguntas informadas não pertencem a este questionário." });
+        const responseId = await db.transaction(async tx => {
+          const [response] = await tx.insert(respostasQuestionario).values({ clinicaId: ctx.clinicaId, clienteId: input.clienteId, sessaoId: input.sessaoId ?? null, questionarioId: input.questionarioId, versaoQuestionario: questionnaire.versao, declaracaoVeracidade: true, assinaturaDigital: input.assinaturaDigital, respondidoPor: ctx.user.id, respostasJson: JSON.stringify(input.respostas) });
+          await tx.insert(respostas).values(input.respostas.map((answer) => ({ clinicaId: ctx.clinicaId, respostaQuestionarioId: response.insertId, perguntaId: answer.perguntaId, respostaTexto: answer.respostaTexto ?? null, respostaBoolean: answer.respostaBoolean ?? null, respostaNumero: answer.respostaNumero ? toCurrency(answer.respostaNumero) : null, respostaData: answer.respostaData ?? null, respostaJson: answer.respostaJson ?? null })));
+          return response.insertId;
+        });
+        await audit(ctx.user.id, "questionario", "RESPONDIDO", responseId, input.clienteId);
+        return { success: true, id: responseId };
       }),
   }),
 
@@ -779,6 +828,7 @@ export const appRouter = router({
         const db = requireDatabase(await getDb());
         const conta = (await db.select().from(contasReceber).where(and(eq(contasReceber.id, input.contaReceberId), eq(contasReceber.clinicaId, ctx.clinicaId))).limit(1))[0];
         if (!conta) throw new TRPCError({ code: "NOT_FOUND", message: "Conta a receber não encontrada." });
+        if (conta.clienteId !== input.clienteId) throw new TRPCError({ code: "BAD_REQUEST", message: "O cliente informado não pertence a esta conta." });
 
         const itensRecebimento = input.pagamentos?.length
           ? input.pagamentos
@@ -804,7 +854,7 @@ export const appRouter = router({
             clinicaId: ctx.clinicaId,
             grupoRecebimento,
             contaReceberId: input.contaReceberId,
-            clienteId: input.clienteId,
+            clienteId: conta.clienteId,
             valor: toCurrency(item.valor),
             tipoPagamento: item.tipoPagamento,
             statusLiquidacao: isCard ? "PENDENTE" as const : "LIQUIDADO" as const,
@@ -841,26 +891,28 @@ export const appRouter = router({
         if (!receipt || receipt.estornadoEm) throw new TRPCError({ code: "NOT_FOUND", message: "Recebimento não encontrado." });
 
         // Buscar conta a receber
-        const conta = (await db.select().from(contasReceber).where(eq(contasReceber.id, receipt.contaReceberId)).limit(1))[0];
+        const conta = (await db.select().from(contasReceber).where(and(eq(contasReceber.id, receipt.contaReceberId), eq(contasReceber.clinicaId, ctx.clinicaId))).limit(1))[0];
         if (!conta) throw new TRPCError({ code: "NOT_FOUND", message: "Conta a receber não encontrada." });
+        if (conta.clienteId !== receipt.clienteId) throw new TRPCError({ code: "BAD_REQUEST", message: "O recebimento possui um vínculo de cliente inconsistente." });
 
         // Buscar informações da clínica
         const clinica = (await db.select().from(clinicas).where(eq(clinicas.id, ctx.clinicaId)).limit(1))[0];
         const settings = (await db.select().from(clinicSettings).where(eq(clinicSettings.clinicaId, ctx.clinicaId)).limit(1))[0];
 
         // Buscar cliente
-        const cliente = (await db.select().from(clientes).where(eq(clientes.id, receipt.clienteId)).limit(1))[0];
+        const cliente = (await db.select().from(clientes).where(and(eq(clientes.id, conta.clienteId), eq(clientes.clinicaId, ctx.clinicaId))).limit(1))[0];
         if (!cliente) throw new TRPCError({ code: "NOT_FOUND", message: "Cliente não encontrado." });
 
         // Buscar sessão e serviço
-        const sessao = conta.sessaoId ? (await db.select().from(sessoes).where(eq(sessoes.id, conta.sessaoId)).limit(1))[0] : null;
-        const servico = sessao ? (await db.select().from(servicos).where(eq(servicos.id, sessao.servicoId)).limit(1))[0] : null;
+        const sessao = conta.sessaoId ? (await db.select().from(sessoes).where(and(eq(sessoes.id, conta.sessaoId), eq(sessoes.clinicaId, ctx.clinicaId), eq(sessoes.clienteId, conta.clienteId))).limit(1))[0] : null;
+        if (conta.sessaoId && !sessao) throw new TRPCError({ code: "BAD_REQUEST", message: "A conta possui um vínculo de sessão inconsistente." });
+        const servico = sessao ? (await db.select().from(servicos).where(and(eq(servicos.id, sessao.servicoId), eq(servicos.clinicaId, ctx.clinicaId))).limit(1))[0] : null;
         
         // Buscar profissional
-        const profissional = sessao ? (await db.select().from(users).where(eq(users.id, sessao.profissionalId)).limit(1))[0] : null;
+        const profissional = sessao ? (await db.select().from(users).where(and(eq(users.id, sessao.profissionalId), eq(users.clinicaId, ctx.clinicaId))).limit(1))[0] : null;
 
         // Buscar todos os pagamentos da conta
-        const todosPagamentos = await db.select().from(recebimentos).where(and(eq(recebimentos.contaReceberId, conta.id), isNull(recebimentos.estornadoEm)));
+        const todosPagamentos = await db.select().from(recebimentos).where(and(eq(recebimentos.contaReceberId, conta.id), eq(recebimentos.clinicaId, ctx.clinicaId), isNull(recebimentos.estornadoEm)));
         const totalPago = todosPagamentos.reduce((sum, r) => sum + Number(r.valor), 0);
         const valorFinalNum = Number(conta.valorFinal);
         const saldoRestante = Math.max(0, valorFinalNum - totalPago);
@@ -1052,36 +1104,21 @@ export const appRouter = router({
   settings: router({
     get: publicProcedure.input(publicClinicInput).query(async ({ input }) => {
       const db = requireDatabase(await getDb());
-      const clinic = (await db.select({ id: clinicas.id }).from(clinicas).where(and(eq(clinicas.slug, input.clinicaSlug), eq(clinicas.ativa, true))).limit(1))[0];
+      const clinic = (await db.select({ id: clinicas.id, nome: clinicas.nome }).from(clinicas).where(and(eq(clinicas.slug, input.clinicaSlug), eq(clinicas.ativa, true))).limit(1))[0];
       if (!clinic) throw new TRPCError({ code: "NOT_FOUND", message: "Clínica não encontrada." });
-      const row = (await db.select().from(clinicSettings).where(eq(clinicSettings.clinicaId, clinic.id)).limit(1))[0];
-      return row ?? {
-        id: 1,
-        nome: "SunSet",
-        razaoSocial: "",
-        segmento: "",
-        slogan: "Seu cuidado, seu momento",
-        logoUrl: "/assets/logo-sunset.svg",
-        corPrimaria: "#C8627A",
-        corSecundaria: "#8F3B50",
-        endereco: "",
-        cep: "",
-        numero: "",
-        complemento: "",
-        bairro: "",
-        cidade: "",
-        estado: "",
-        telefone: "",
-        whatsapp: "",
-        cnpj: "",
-        emailContato: "",
-      };
+      const row = (await db.select({ nome: clinicSettings.nome, slogan: clinicSettings.slogan, logoUrl: clinicSettings.logoUrl, corPrimaria: clinicSettings.corPrimaria }).from(clinicSettings).where(eq(clinicSettings.clinicaId, clinic.id)).limit(1))[0];
+      const logo = row?.logoUrl ?? null;
+      const logoMatch = logo?.match(/^\/storage\/clinica\/([1-9]\d*)\/clinic-assets\/logo_[a-f0-9]{8}\.(?:jpg|png|webp)$/);
+      const safeLogo = logo === "/assets/logo-sunset.svg" || (logoMatch && Number(logoMatch[1]) === clinic.id) ? logo : null;
+      return { nome: row?.nome || clinic.nome, slogan: row?.slogan ?? null,
+        logoUrl: safeLogo,
+        corPrimaria: row?.corPrimaria ?? null };
     }),
     getAtual: protectedProcedure.query(async ({ ctx }) => {
       const db = requireDatabase(await getDb());
       const row = (await db.select().from(clinicSettings).where(eq(clinicSettings.clinicaId, ctx.clinicaId)).limit(1))[0];
-      const clinicRow = (await db.select({ slug: clinicas.slug }).from(clinicas).where(eq(clinicas.id, ctx.clinicaId)).limit(1))[0];
-      const slug = clinicRow?.slug ?? "clinica-principal";
+      const clinicRow = (await db.select({ slug: clinicas.slug }).from(clinicas).where(and(eq(clinicas.id, ctx.clinicaId), eq(clinicas.ativa, true))).limit(1))[0];
+      const slug = clinicRow?.slug ?? null;
       return {
         ...(row ?? {
           id: 1,
@@ -1122,7 +1159,7 @@ export const appRouter = router({
         brevoSmsSender: row?.brevoSmsSender ?? "",
         brevoWhatsappSender: row?.brevoWhatsappSender ?? "",
         brevoWhatsappTemplateId: row?.brevoWhatsappTemplateId ?? "",
-        emailAtivo: row?.emailAtivo ?? true,
+        emailAtivo: row?.emailAtivo ?? false,
         smsAtivo: row?.smsAtivo ?? false,
         whatsappAtivo: row?.whatsappAtivo ?? false,
         apiKeyConfigured: Boolean(row?.brevoApiKeyEncrypted),
@@ -1318,38 +1355,6 @@ export const appRouter = router({
     }),
   }),
 
-  administracaoDados: router({
-    limparOperacao: adminOnlyProcedure.input(z.object({
-      senha: z.string().min(1, "Informe sua senha para confirmar."),
-      confirmacao: z.literal("LIMPAR DADOS", { message: "Digite LIMPAR DADOS para confirmar." }),
-    })).mutation(async ({ input, ctx }) => {
-      const db = requireDatabase(await getDb());
-      const gestor = (await db.select({ passwordHash: users.passwordHash }).from(users).where(and(eq(users.id, ctx.user.id), eq(users.clinicaId, ctx.clinicaId))).limit(1))[0];
-      if (!gestor?.passwordHash || !(await bcrypt.compare(input.senha, gestor.passwordHash))) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Senha do gestor inválida." });
-      }
-      await db.transaction(async (tx) => {
-        await tx.delete(auditoria).where(eq(auditoria.clinicaId, ctx.clinicaId));
-        await tx.delete(lembretes).where(eq(lembretes.clinicaId, ctx.clinicaId));
-        await tx.delete(recebimentos).where(eq(recebimentos.clinicaId, ctx.clinicaId));
-        await tx.delete(comissoes).where(eq(comissoes.clinicaId, ctx.clinicaId));
-        await tx.delete(contasReceber).where(eq(contasReceber.clinicaId, ctx.clinicaId));
-        await tx.delete(despesas).where(eq(despesas.clinicaId, ctx.clinicaId));
-        await tx.delete(fotosProntuario).where(eq(fotosProntuario.clinicaId, ctx.clinicaId));
-        await tx.delete(evolucoes).where(eq(evolucoes.clinicaId, ctx.clinicaId));
-        await tx.delete(respostas).where(eq(respostas.clinicaId, ctx.clinicaId));
-        await tx.delete(respostasQuestionario).where(eq(respostasQuestionario.clinicaId, ctx.clinicaId));
-        await tx.delete(publicBookingTokens).where(eq(publicBookingTokens.clinicaId, ctx.clinicaId));
-        await tx.delete(sessoes).where(eq(sessoes.clinicaId, ctx.clinicaId));
-        await tx.delete(prontuarios).where(eq(prontuarios.clinicaId, ctx.clinicaId));
-        await tx.delete(clientes).where(eq(clientes.clinicaId, ctx.clinicaId));
-        await tx.delete(caixasDiarios).where(eq(caixasDiarios.clinicaId, ctx.clinicaId));
-      });
-      await audit(ctx.user.id, "administracao_dados", "LIMPEZA_OPERACIONAL", 0, undefined, { preservados: ["usuarios", "configuracoes", "servicos", "profissionais", "salas", "equipamentos", "insumos"] });
-      return { success: true };
-    }),
-  }),
-
   agendamentoPublico: router({
     cadastro: publicProcedure.input(publicRegistrationInput).mutation(async ({ input }) => {
       const { db, clinic } = await resolvePublicClinic(input.clinicaSlug);
@@ -1361,8 +1366,9 @@ export const appRouter = router({
         throw new TRPCError({ code: "CONFLICT", message: "Os dados informados correspondem a cadastros diferentes. Entre em contato com a clínica para unificá-los." });
       }
       const existing = byEmail ?? byPhone;
+      if (existing) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Para continuar com este cadastro, entre em contato com a clínica." });
       const consentedAt = new Date();
-      const clientId = existing?.id ?? (await db.insert(clientes).values({
+      const clientId = (await db.insert(clientes).values({
         clinicaId: clinic.id,
         nome: input.nome,
         email,
@@ -1372,20 +1378,7 @@ export const appRouter = router({
         optInComunicacao: true,
       }))[0].insertId;
 
-      if (existing) {
-        if (existing.status === "BLOQUEADO") throw new TRPCError({ code: "FORBIDDEN", message: "Este cadastro não está disponível para agendamento on-line. Entre em contato com a clínica." });
-        await db.update(clientes).set({
-          nome: input.nome,
-          email: email ?? existing.email,
-          telefone: telefone ?? existing.telefone,
-          canalPreferido: input.canalPreferido,
-          consentimentoDadosEm: consentedAt,
-          optInComunicacao: true,
-          status: "ATIVO",
-        }).where(and(eq(clientes.id, existing.id), eq(clientes.clinicaId, clinic.id)));
-      } else {
-        await db.insert(prontuarios).values({ clinicaId: clinic.id, clienteId: clientId });
-      }
+      await db.insert(prontuarios).values({ clinicaId: clinic.id, clienteId: clientId });
 
       const token = nanoid(48);
       const expiresAt = new Date(Date.now() + 4 * 60 * 60_000);
@@ -1396,7 +1389,7 @@ export const appRouter = router({
         clienteId: clientId,
         entidade: "agendamento_publico",
         entidadeId: clientId,
-        acao: existing ? "CADASTRO_ATUALIZADO" : "CADASTRO_CRIADO",
+        acao: "CADASTRO_CRIADO",
         dadosDepoisJson: JSON.stringify({ canalPreferido: input.canalPreferido, consentimentoDadosEm: consentedAt.toISOString() }),
       });
       return { success: true, token, clienteNome: input.nome, expiraEm: expiresAt };
@@ -1416,8 +1409,8 @@ export const appRouter = router({
       };
     }),
 
-    questionarios: publicProcedure.input(z.object({ token: z.string().min(20).max(128) })).query(async ({ input }) => {
-      const { db, client, bookingSession } = await resolvePublicBookingSession(input.token);
+    questionarios: publicProcedure.input(publicClinicInput.extend({ token: z.string().min(20).max(128) })).query(async ({ input }) => {
+      const { db, client, bookingSession } = await resolvePublicBookingSession(input.token, input.clinicaSlug);
       const published = await db.select().from(questionarios).where(and(eq(questionarios.clinicaId, bookingSession.clinicaId), eq(questionarios.ativo, true), isNull(questionarios.servicoId))).orderBy(questionarios.nome);
       const answered = await db.select({ questionarioId: respostasQuestionario.questionarioId, versaoQuestionario: respostasQuestionario.versaoQuestionario }).from(respostasQuestionario).where(and(eq(respostasQuestionario.clinicaId, bookingSession.clinicaId), eq(respostasQuestionario.clienteId, client.id)));
       const results = await Promise.all(published.map(async (questionnaire) => {
@@ -1439,7 +1432,7 @@ export const appRouter = router({
       return results;
     }),
 
-    responderAnamnese: publicProcedure.input(z.object({
+    responderAnamnese: publicProcedure.input(publicClinicInput.extend({
       token: z.string().min(20).max(128),
       questionarioId: z.number().int().positive(),
       declaracaoVeracidade: z.literal(true),
@@ -1453,7 +1446,7 @@ export const appRouter = router({
         respostaJson: z.string().max(8000).optional(),
       })).min(1),
     })).mutation(async ({ input }) => {
-      const { db, client, bookingSession } = await resolvePublicBookingSession(input.token);
+      const { db, client, bookingSession } = await resolvePublicBookingSession(input.token, input.clinicaSlug);
       if (normalizeName(input.assinaturaDigital) !== normalizeName(client.nome)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "A assinatura deve corresponder ao nome informado no cadastro." });
       }
@@ -1507,14 +1500,14 @@ export const appRouter = router({
       return { slots: publicAvailableSlots(input.data, service.duracaoMin, busy) };
     }),
 
-    solicitar: publicProcedure.input(z.object({
+    solicitar: publicProcedure.input(publicClinicInput.extend({
       token: z.string().min(20).max(128),
       servicoId: z.number().int().positive(),
       profissionalId: z.number().int().positive(),
       dataHoraInicio: z.coerce.date(),
       timeZone: z.string().trim().min(1).max(64).optional(),
     })).mutation(async ({ input }) => {
-      const { db, client, bookingSession } = await resolvePublicBookingSession(input.token);
+      const { db, client, bookingSession } = await resolvePublicBookingSession(input.token, input.clinicaSlug);
       if (input.dataHoraInicio.getTime() < Date.now() + 15 * 60_000) throw new TRPCError({ code: "BAD_REQUEST", message: "Escolha um horário com pelo menos 15 minutos de antecedência." });
       const service = (await db.select().from(servicos).where(and(eq(servicos.id, input.servicoId), eq(servicos.clinicaId, bookingSession.clinicaId), eq(servicos.ativo, true))).limit(1))[0];
       if (!service) throw new TRPCError({ code: "NOT_FOUND", message: "Serviço não encontrado ou indisponível." });
