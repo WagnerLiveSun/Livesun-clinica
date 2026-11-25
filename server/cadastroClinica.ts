@@ -9,7 +9,7 @@ import { centralRegistrationEvent } from "./centralRegistrationClient";
 import { getDb } from "./db";
 import { publicProcedure, router } from "./_core/trpc";
 import { sendRegistrationEmail } from "./registrationEmail";
-import { centralOrigin } from "./centralRegistrationClient";
+import { registrationConfig } from "./registrationConfig";
 import { deliverPendingRegistrations } from "./centralRegistrationOutbox";
 
 function validateDocument(value: string) {
@@ -41,12 +41,8 @@ function registrationMode() {
   if (process.env.PUBLIC_REGISTRATION_ENABLED === "true") {
     const baseUrl = process.env.PUBLIC_BASE_URL ?? "";
     const apiKey = process.env.BREVO_API_KEY ?? "";
-    const fromEmail = process.env.BREVO_FROM_EMAIL ?? "";
-    try { centralOrigin(baseUrl, { environment: process.env.NODE_ENV ?? "production", allowLocalHttp: process.env.CENTRAL_ALLOW_LOCAL_HTTP === "true" }); }
-    catch { throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cadastro indisponível. Tente novamente mais tarde." }); }
-    if (process.env.CENTRAL_ENABLED !== "true" || !(process.env.CENTRAL_API_TOKEN ?? "").trim() || (process.env.CENTRAL_WEBHOOK_SECRET ?? "").length < 32 || !apiKey || !z.string().email().safeParse(fromEmail).success) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cadastro indisponível. Tente novamente mais tarde." });
-    try { centralOrigin(process.env.CENTRAL_BASE_URL ?? "", { environment: process.env.NODE_ENV ?? "production", allowLocalHttp: process.env.CENTRAL_ALLOW_LOCAL_HTTP === "true" }); }
-    catch { throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cadastro indisponível. Tente novamente mais tarde." }); }
+    const { problems, fromEmail } = registrationConfig(process.env);
+    if (problems.length) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cadastro indisponível. Tente novamente mais tarde." });
     return { local: false as const, baseUrl, apiKey, fromEmail };
   }
   requireHomologation();

@@ -11,7 +11,7 @@ import { dispatchDueReminderEmails } from "../reminders";
 import { serveStatic, setupVite } from "./vite";
 import { registerCentralLinkRoute } from "../centralLinkRoute";
 import { deliverPendingRegistrations } from "../centralRegistrationOutbox";
-import { centralOrigin } from "../centralRegistrationClient";
+import { registrationConfig } from "../registrationConfig";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -36,10 +36,8 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
   if (process.env.NODE_ENV === "production" && process.env.PUBLIC_REGISTRATION_ENABLED === "true") {
-    const allowed = process.env.CENTRAL_ENABLED === "true" && (process.env.CENTRAL_WEBHOOK_SECRET ?? "").length >= 32 && Boolean(process.env.CENTRAL_API_TOKEN) && Boolean(process.env.BREVO_API_KEY) && Boolean(process.env.BREVO_FROM_EMAIL);
-    if (!allowed) throw new Error("Cadastro em produção requer configuração Central e Brevo completa.");
-    centralOrigin(process.env.PUBLIC_BASE_URL ?? "", { environment: "production", allowLocalHttp: false });
-    centralOrigin(process.env.CENTRAL_BASE_URL ?? "", { environment: "production", allowLocalHttp: false });
+    const { problems } = registrationConfig(process.env);
+    if (problems.length) console.error(`[Cadastro] Indisponível até corrigir: ${problems.join(", ")}. Nenhum valor de segredo é exibido.`);
   }
   const testDatabase = (() => { try { const url = new URL(process.env.DATABASE_URL ?? ""); return url.protocol === "mysql:" && ["127.0.0.1", "localhost"].includes(url.hostname) && url.pathname === "/clinica_cadastro_duplo_homologacao_20261124"; } catch { return false; } })();
   registerCentralLinkRoute(app, process.env.CENTRAL_WEBHOOK_SECRET ?? "", process.env.CENTRAL_ENABLED === "true" || (process.env.NODE_ENV !== "production" && process.env.CLINICA_CADASTRO_HOMOLOGACAO === "1" && testDatabase));
