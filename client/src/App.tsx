@@ -8,6 +8,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Booking from "./pages/Booking";
 import Home from "./pages/Home";
 import LandingClinicas from "./pages/LandingClinicas";
+import Support from "./pages/Support";
 
 function Router() {
   // make sure to consider if you need authentication for certain routes
@@ -15,6 +16,7 @@ function Router() {
     <Switch>
       <Route path={"/lp/clinicas"} component={LandingClinicas} />
       <Route path={"/agendar"} component={Booking} />
+      <Route path={"/suporte"} component={Support} />
       <Route path={"/"} component={Home} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}

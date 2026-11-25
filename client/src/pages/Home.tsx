@@ -16,15 +16,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ReceiptGenerator } from "@/components/ReceiptGenerator";
 import { TrialWelcome } from "@/components/TrialWelcome";
+import { SupportContent } from "@/components/SupportContent";
 import {
   Activity, CalendarDays, Check, ChevronRight, CircleDollarSign, ClipboardList,
-  FilePlus2, Files, HeartPulse, ImagePlus, LayoutDashboard, LogOut, Menu,
+  FilePlus2, Files, Headphones, HeartPulse, ImagePlus, LayoutDashboard, LogOut, Menu,
   PackagePlus, Palette, Plus, Printer, ReceiptText, RefreshCw, Settings2, ShieldCheck, Sparkles, Stethoscope, Trash2, Users,
   WalletCards, X, type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
-type Section = "inicio" | "agenda" | "clientes" | "servicos" | "questionarios" | "financeiro" | "gestao";
+type Section = "inicio" | "agenda" | "clientes" | "servicos" | "questionarios" | "financeiro" | "gestao" | "suporte";
 
 const roleLabel: Record<string, string> = {
   master: "Consultor Master", admin: "Gestor(a)", recepcao: "Recepção", profissional: "Profissional", cliente: "Cliente", user: "Cliente",
@@ -438,7 +439,7 @@ export default function Home() {
       {resetToken && <><Label htmlFor="new-password">Nova senha</Label><Input id="new-password" type="password" minLength={10} value={accessPassword} onChange={(event) => setAccessPassword(event.target.value)} autoComplete="new-password" required /><Label htmlFor="confirm-password">Confirme a nova senha</Label><Input id="confirm-password" type="password" minLength={10} value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" required /></>}
       <Button type="submit" className="primary-action" disabled={submitting}>{resetToken ? "Atualizar senha" : accessMode === "bootstrap" ? "Enviar convite seguro" : accessMode === "forgot" ? "Enviar link" : "Entrar no sistema"} <ChevronRight /></Button>
       {!resetToken && <div className="login-links">{accessMode === "login" ? <><button type="button" className="login-link" onClick={() => setAccessMode("forgot")}>Esqueci minha senha</button><button type="button" className="login-link" onClick={() => setAccessMode("bootstrap")}>Primeiro acesso do gestor</button></> : <button type="button" className="login-link" onClick={() => setAccessMode("login")}>Voltar para o login</button>}</div>}
-    </form><BrandCredit className="login-credit" /></div></main>;
+    </form><p className="mt-4 text-center"><a href="/suporte" className="login-link">Contato e suporte</a></p><BrandCredit className="login-credit" /></div></main>;
   }
 
   if (isClient) {
@@ -453,7 +454,7 @@ export default function Home() {
         <Card className="surface-card portal-questionnaire"><CardHeader><CardTitle>Anamnese pendente</CardTitle><CardDescription>Preencha e assine os formulários solicitados para seu atendimento.</CardDescription></CardHeader><CardContent className="space-y-4">{portalQuery.data?.questionariosPendentes.map((questionnaire) => <button key={questionnaire.id} className="questionnaire-choice" onClick={() => { setPortalQuestionnaireId(questionnaire.id); setPortalAnswers({}); setPortalSignature(user.name ?? ""); }}><ClipboardList /><span><strong>{questionnaire.nome}</strong><small>Versão {questionnaire.versao}</small></span><ChevronRight /></button>)}{!portalQuery.data?.questionariosPendentes.length && <p className="empty-copy">Nenhum formulário pendente.</p>}</CardContent></Card>
         {portalQuestionnaireId && portalQuestionnaireQuery.data && <Card className="surface-card portal-answer-card"><CardHeader><div><p className="eyebrow">ANAMNESE</p><CardTitle>{portalQuestionnaireQuery.data.nome}</CardTitle><CardDescription>Preencha as respostas e confirme a declaração de veracidade.</CardDescription></div><Button variant="ghost" size="icon" onClick={() => setPortalQuestionnaireId(null)}><X /></Button></CardHeader><CardContent className="form-stack">{portalQuestionnaireQuery.data.perguntas.map((question) => <div className="field" key={question.id}><Label>{question.ordem}. {question.texto}{question.obrigatoria ? " *" : ""}</Label>{question.tipoResposta === "BOOLEAN" ? <Select value={portalAnswers[question.id ?? 0]} onValueChange={(value) => setPortalAnswers((answers) => ({ ...answers, [question.id ?? 0]: value }))}><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent><SelectItem value="true">Sim</SelectItem><SelectItem value="false">Não</SelectItem></SelectContent></Select> : <Input type={question.tipoResposta === "DATA" ? "date" : question.tipoResposta === "NUMERO" ? "number" : "text"} value={portalAnswers[question.id ?? 0] ?? ""} onChange={(event) => setPortalAnswers((answers) => ({ ...answers, [question.id ?? 0]: event.target.value }))} />}</div>)}<div className="field"><Label>Assinatura digital (nome completo)</Label><Input value={portalSignature} onChange={(event) => setPortalSignature(event.target.value)} placeholder="Digite seu nome completo" /></div><p className="declaration-copy">Ao enviar, declaro que as informações são verdadeiras e autorizo seu registro no meu prontuário.</p><Button className="primary-action" disabled={!portalQuery.data?.clientId || portalSignature.trim().length < 4 || answerQuestionnaire.isPending} onClick={() => { const questions = portalQuestionnaireQuery.data?.perguntas ?? []; answerQuestionnaire.mutate({ clienteId: portalQuery.data!.clientId!, questionarioId: portalQuestionnaireId, declaracaoVeracidade: true, assinaturaDigital: portalSignature.trim(), respostas: questions.map((question) => question.tipoResposta === "BOOLEAN" ? { perguntaId: question.id!, respostaBoolean: portalAnswers[question.id!] === "true" } : question.tipoResposta === "NUMERO" ? { perguntaId: question.id!, respostaNumero: portalAnswers[question.id!] || "0" } : { perguntaId: question.id!, respostaTexto: portalAnswers[question.id!] ?? "" }) }); }}>Assinar e enviar</Button></CardContent></Card>}
       </section>
-      <footer className="portal-footer"><BrandCredit /></footer>
+      <footer className="portal-footer"><a href="/suporte" className="login-link">Contato e suporte</a><BrandCredit /></footer>
     </main>;
   }
 
@@ -472,7 +473,7 @@ export default function Home() {
         {!allClinicsQuery.data?.length && <p className="empty-copy">Nenhuna clínica configurada no sistema.</p>}
       </div>
       <div className="master-info"><p>Bem-vindo, {user.name ?? "consultor"}. Utilize este acesso para configurar qualquer ambiente a partir de um só lugar.</p></div>
-      <button type="button" className="login-link" onClick={() => logout()}>Encerrar sessão</button>
+      <a href="/suporte" className="login-link">Contato e suporte</a><button type="button" className="login-link" onClick={() => logout()}>Encerrar sessão</button>
     </div></div></main>;
   }
 
@@ -480,7 +481,7 @@ export default function Home() {
     { id: "inicio", label: "Visão geral", icon: LayoutDashboard, visible: true }, { id: "agenda", label: "Agenda", icon: CalendarDays, visible: true },
     { id: "clientes", label: "Clientes", icon: Users, visible: true }, { id: "servicos", label: "Serviços", icon: Sparkles, visible: isAdmin },
     { id: "questionarios", label: "Anamnese", icon: ClipboardList, visible: true }, { id: "financeiro", label: "Financeiro", icon: WalletCards, visible: isManager },
-    { id: "gestao", label: "Gestão", icon: Settings2, visible: isAdmin },
+    { id: "gestao", label: "Gestão", icon: Settings2, visible: isAdmin }, { id: "suporte", label: "Suporte", icon: Headphones, visible: true },
   ];
 
   return <div className="clinic-shell">
@@ -493,6 +494,7 @@ export default function Home() {
       <header className="mobile-topbar"><Button variant="ghost" size="icon" onClick={() => setMobileMenu(true)}><Menu /></Button><div className="brand-lockup"><div className="brand-mark">{clinicLogo ? <img src={clinicLogo} alt="Logo" className="w-full h-full object-cover rounded-full" /> : <Sparkles />}</div><div className="brand-copy"><strong>{clinicName}</strong><span className="text-xs text-muted-foreground font-medium">Sistema SunSet</span></div></div></header>
       <main className="dashboard-main">
         {role === "admin" && <TrialWelcome key={user.id} userId={user.id} />}
+        {section === "suporte" && <SupportContent />}
         {section === "inicio" && <>
           <SectionHeader eyebrow="PAINEL OPERACIONAL" title="Bom dia, sua clínica está em movimento." description="Acompanhe os indicadores e prioridades da operação de hoje." action={<div className="header-actions">{isManager && <Button variant="outline" onClick={() => setShowClientForm(true)}><Users /> Novo cliente</Button>}<Button className="primary-action" onClick={() => setShowSessionForm(true)}><Plus /> Agendamento</Button></div>} />
           <div className="metric-grid"><Metric icon={CircleDollarSign} label="Faturamento do mês" value={currency(statsQuery.data?.faturamentoMes)} /><Metric icon={CalendarDays} label="Agenda de hoje" value={String(statsQuery.data?.agendamentosHoje ?? 0)} /><Metric icon={Activity} label="Taxa de ocupação" value={`${statsQuery.data?.taxaOcupacao ?? 0}%`} /><Metric icon={Users} label="Clientes ativos" value={String(statsQuery.data?.clientesTotal ?? 0)} /></div>
